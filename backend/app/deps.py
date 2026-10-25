@@ -1,16 +1,18 @@
 from fastapi import Cookie, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth import COOKIE_NAME, user_for_token
+from app import tokens
+from app.auth import ACCESS_COOKIE
 from app.db import get_db
 from app.models import User
 
 
 def get_current_user(
-    access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    access_token: str | None = Cookie(default=None, alias=ACCESS_COOKIE),
     db: Session = Depends(get_db),
 ) -> User:
-    user = user_for_token(db, access_token)
+    user_id = tokens.verify_access_token(access_token)
+    user = db.get(User, user_id) if user_id is not None else None
     if user is None:
         raise HTTPException(status_code=401, detail="not logged in")
     if user.status == "suspended":

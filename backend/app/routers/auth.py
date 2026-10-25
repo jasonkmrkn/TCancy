@@ -1,10 +1,12 @@
+from urllib import response
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import profiles, security
-from app.auth import COOKIE_NAME, create_session, delete_session
+from app import auth, profiles, security
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import User
@@ -16,6 +18,10 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 def user_out(user: User) -> dict:
     return {"id": str(user.id), "username": user.username, "role": user.role, "status": user.status}
 
+def _refresh_failed(status_code: int, detail: str) -> JSONResponse:
+    failed = JSONResponse({"detail": detail}, status_code=status_code)
+    auth.clear_auth_cookies(failed)
+    return failed
 
 def _register(db: Session, body: AlumniRegisterIn, role: str, status: str, profile=None) -> dict:
     if db.scalar(select(User.id).where(User.username == body.username)) is not None:
@@ -66,20 +72,34 @@ def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="ACCOUNT_SUSPENDED")
     if security.needs_rehash(user.password_hash):
         user.password_hash = security.hash_password(body.password)
-    token = create_session(db, user)
-    response.set_cookie(COOKIE_NAME, token, httponly=True, path="/")
+    access_token, refresh_token = auth.start_session(db, user)
+    auth.set_auth_cookies(response, access_token, refresh_token)
     return user_out(user)
 
+@router.post("/refresh")
+def refresh(
+    refresh_token: str | None = Cookie(default=None, alias=auth.REFRESH_COOKIE),
+    db: Session = Depends(get_db),
+):
+    try:
+        _user, access_token, new_refresh_token = auth.rotate_refresh_token(db, refresh_token)
+    except auth.SuspendedAccount:
+        return _refresh_failed(403, "ACCOUNT_SUSPENDED")
+    except auth.InvalidRefreshToken:
+        return _refresh_failed(401, "invalid refresh token")
+    ok = JSONResponse({"ok": True})
+    auth.set_auth_cookies(ok, access_token, new_refresh_token)
+    return ok
 
 @router.post("/logout")
 def logout(
     response: Response,
-    user: User = Depends(get_current_user),
-    access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    refresh_token: str | None = Cookie(default=None, alias=auth.REFRESH_COOKIE),
+
     db: Session = Depends(get_db),
 ):
-    delete_session(db, access_token)
-    response.delete_cookie(COOKIE_NAME, path="/")
+    auth.end_session(db, refresh_token)
+    auth.clear_auth_cookies(response)
     return {"ok": True}
 
 

@@ -50,7 +50,7 @@ def test_delete_applicant_removes_related_rows(client):
         ("users", "id"),
         ("applicant_profiles", "user_id"),
         ("applicant_skills", "user_id"),
-        ("sessions", "user_id"),
+        ("refresh_tokens", "user_id"),
     ]:
         assert count("SELECT count(*) FROM %s WHERE %s = :u" % (table, col), u=uid) == 0
     # the other user is untouched

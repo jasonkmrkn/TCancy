@@ -10,7 +10,8 @@ _test_url = os.environ.get(
 _db_name = _test_url.rsplit("/", 1)[-1].split("?")[0]
 assert _db_name.endswith("_test"), "TEST_DATABASE_URL must point to a database ending in _test"
 
-# Must be set before app modules are imported.
+os.environ.setdefault("SESSION_SECRET", "test-only-secret-not-for-production-use-0123456789")
+os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ["DATABASE_URL"] = _test_url
 _upload_dir = tempfile.mkdtemp(prefix="tcancy_uploads_")
 os.environ["UPLOAD_DIR"] = _upload_dir
