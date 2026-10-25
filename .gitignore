@@ -1,0 +1,11 @@
+logs/
+.run.lock
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
+.next/
+*.pyc
+backend/uploads/
+.env
+backend/.env
