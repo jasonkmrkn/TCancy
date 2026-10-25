@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import text
 
 from app.db import engine
-from helpers import make_profile, skill_ids
+from helpers import make_profile, password_hash, skill_ids
 
 AUTH = "/api/v1/auth"
 
@@ -174,7 +174,10 @@ def test_profile_requires_login(client):
 
 def test_admin_forbidden(client):
     with engine.begin() as conn:
-        conn.execute(text("INSERT INTO users (username, password, role) VALUES ('boss','rahasia123','admin')"))
+        conn.execute(
+            text("INSERT INTO users (username, password_hash, role) VALUES ('boss', :h, 'admin')"),
+            {"h": password_hash()},
+        )
     login(client, "boss")
     assert client.get("/api/v1/me/profile").status_code == 403
 

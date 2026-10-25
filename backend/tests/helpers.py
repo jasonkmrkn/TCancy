@@ -1,11 +1,22 @@
 import itertools
 
+from functools import cache
+
 from sqlalchemy import text
+
+from app import security
 
 from app.db import engine
 
 _counter = itertools.count(1)
 
+@cache
+def password_hash(password="rahasia123"):
+    """Argon2 hash of `password`, computed once per test run.
+
+    For users inserted with raw SQL, which must now fill password_hash.
+    """
+    return security.hash_password(password)
 
 def skill_ids(n=2):
     with engine.connect() as conn:
