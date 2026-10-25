@@ -5,6 +5,8 @@ import sys
 from pydantic import ValidationError
 from sqlalchemy import select
 
+from app import security
+
 from app.db import SessionLocal
 from app.models import User
 from app.schemas import AlumniRegisterIn
@@ -19,7 +21,12 @@ def create_admin(username: str, password: str) -> User:
     with SessionLocal() as db:
         if db.scalar(select(User.id).where(User.username == data.username)) is not None:
             raise ValueError("username already taken")
-        user = User(username=data.username, password=data.password, role="admin", status="active")
+        user = User(
+            username=data.username,
+            password_hash=security.hash_password(data.password),
+            role="admin",
+            status="active",
+        )
         db.add(user)
         db.commit()
         db.refresh(user)

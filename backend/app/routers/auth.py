@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import profiles
+from app import profiles, security
 from app.auth import COOKIE_NAME, create_session, delete_session
 from app.db import get_db
 from app.deps import get_current_user
@@ -23,7 +23,13 @@ def _register(db: Session, body: AlumniRegisterIn, role: str, status: str, profi
     if profile is not None:
         profiles.check_skills(db, profile.skill_ids)
         profiles.check_unique(db, profile)
-    user = User(username=body.username, password=body.password, role=role, status=status)
+    user = User(
+        username=body.username,
+        password_hash=security.hash_password(body.password),
+        role=role,
+        status=status,
+    )
+
     db.add(user)
     try:
         db.flush()
@@ -52,10 +58,14 @@ def register_alumni(body: AlumniRegisterIn, db: Session = Depends(get_db)):
 @router.post("/login")
 def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == body.username))
-    if user is None or user.password != body.password:
+    stored_hash = user.password_hash if user is not None else security.DUMMY_HASH
+    password_ok = security.verify_password(stored_hash, body.password)
+    if user is None or not password_ok:
         raise HTTPException(status_code=401, detail="invalid username or password")
     if user.status == "suspended":
         raise HTTPException(status_code=403, detail="ACCOUNT_SUSPENDED")
+    if security.needs_rehash(user.password_hash):
+        user.password_hash = security.hash_password(body.password)
     token = create_session(db, user)
     response.set_cookie(COOKIE_NAME, token, httponly=True, path="/")
     return user_out(user)

@@ -1,13 +1,12 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import storage
+from app import security, storage
 from app.models import Document, User
 
 
 def password_matches(user: User, password: str) -> bool:
-    return user.password == password
-
+    return security.verify_password(user.password_hash, password)
 
 def delete_account(db: Session, user: User) -> None:
     """Delete the user. Profiles, sessions and other owned rows go away through

@@ -33,7 +33,7 @@ class User(Base):
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    password: Mapped[str] = mapped_column(Text, nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(
         Enum(*ROLES, name="user_role"), nullable=False, server_default="applicant"
     )

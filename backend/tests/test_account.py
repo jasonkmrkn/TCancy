@@ -1,7 +1,7 @@
 from sqlalchemy import text
 
 from app.db import engine
-from helpers import make_profile
+from helpers import make_profile, password_hash
 
 AUTH = "/api/v1/auth"
 URL = "/api/v1/me/account"
@@ -107,7 +107,8 @@ def test_pending_alumni_can_delete(client):
 def test_admin_forbidden(client):
     with engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO users (username, password, role) VALUES ('root', 'rahasia123', 'admin')")
+            text("INSERT INTO users (username, password_hash, role) VALUES ('root', :h, 'admin')"),
+            {"h": password_hash()},
         )
     login(client, "root")
     r = delete(client)
