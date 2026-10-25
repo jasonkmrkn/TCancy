@@ -2,11 +2,12 @@ import pytest
 from fastapi import Depends
 from sqlalchemy import select, text
 
+from app import tokens
+
 from app.db import SessionLocal, engine
 from app.deps import require_role
 from app.main import app
-from app.models import Session as SessionRow
-from app.models import User
+from app.models import RefreshToken, User
 from helpers import make_profile
 
 BASE = "/api/v1/auth"
@@ -78,13 +79,16 @@ def test_login_sets_cookie_and_me(client):
     assert r.status_code == 200
     assert r.json()["username"] == "budi"
     assert "access_token" in client.cookies
+    assert "refresh_token" in client.cookies
     me = client.get(BASE + "/me")
     assert me.status_code == 200
     assert me.json() == r.json()
     with SessionLocal() as db:
-        rows = db.scalars(select(SessionRow)).all()
+        rows = db.scalars(select(RefreshToken)).all()
         assert len(rows) == 1
-        assert rows[0].token == client.cookies["access_token"]
+        assert rows[0].token_hash == tokens.hash_refresh_token(client.cookies["refresh_token"])
+        assert rows[0].token_hash != client.cookies["refresh_token"]
+        assert rows[0].revoked_at is None
         assert db.scalar(select(User.last_login_at)) is not None
 
 
@@ -95,6 +99,9 @@ def test_login_wrong_credentials(client):
         assert r.status_code == 401
         assert r.json()["detail"] == "invalid username or password"
     assert "access_token" not in client.cookies
+    assert "refresh_token" not in client.cookies
+    with SessionLocal() as db:
+        assert db.scalar(select(RefreshToken.id)) is None
 
 
 def test_login_suspended(client):
@@ -114,24 +121,28 @@ def test_suspended_existing_session_blocked(client):
     assert r.json()["detail"] == "ACCOUNT_SUSPENDED"
 
 
-def test_logout_deletes_session(client):
+def test_logout_revokes_refresh_token_and_clears_cookies(client):
     register(client)
     login(client)
-    token = client.cookies["access_token"]
     r = client.post(BASE + "/logout")
     assert r.status_code == 200
     assert r.json() == {"ok": True}
+    assert "access_token" not in client.cookies
+    assert "refresh_token" not in client.cookies
     with SessionLocal() as db:
-        assert db.scalar(select(SessionRow).where(SessionRow.token == token)) is None
-    client.cookies.set("access_token", token)
+        rows = db.scalars(select(RefreshToken)).all()
+        assert len(rows) == 1 and rows[0].revoked_at is not None
     assert client.get(BASE + "/me").status_code == 401
 
+def test_logout_without_cookies_is_ok(client):
+    r = client.post(BASE + "/logout")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
 
 def test_not_logged_in(client):
-    for method, path in [("get", "/me"), ("post", "/logout")]:
-        r = getattr(client, method)(BASE + path)
-        assert r.status_code == 401
-        assert r.json()["detail"] == "not logged in"
+    r = client.get(BASE + "/me")
+    assert r.status_code == 401
+    assert r.json()["detail"] == "not logged in"
     assert client.get("/_test/applicant").status_code == 401
 
 

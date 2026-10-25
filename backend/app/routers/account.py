@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app import account
-from app.auth import COOKIE_NAME
+from app import account, auth
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
@@ -27,5 +26,5 @@ def delete_my_account(
     if not account.password_matches(user, body.password):
         raise HTTPException(status_code=403, detail="INVALID_PASSWORD")
     account.delete_account(db, user)
-    response.delete_cookie(COOKIE_NAME, path="/")
+    auth.clear_auth_cookies(response)
     return {"ok": True}

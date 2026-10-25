@@ -1,6 +1,10 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from app import tokens
 
 from app.db import get_db
 from app.routers import account as account_router
@@ -14,7 +18,12 @@ from app.routers import owner as owner_router
 from app.routers import profile as profile_router
 from app.routers import testimonials as testimonials_router
 
-app = FastAPI(title="TCancy")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    tokens.check_secret()
+    yield
+
+app = FastAPI(title="TCancy", lifespan=lifespan)
 app.include_router(auth_router.router)
 app.include_router(profile_router.router)
 app.include_router(account_router.router)

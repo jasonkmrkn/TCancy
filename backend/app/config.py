@@ -11,4 +11,4 @@ SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
 ACCESS_TOKEN_MINUTES = 15
 REFRESH_TOKEN_DAYS = 7
 
-COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").strip().lower() in ("1", "true", "yes")
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").strip().lower() not in ("0", "false", "no")
