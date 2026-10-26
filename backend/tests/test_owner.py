@@ -27,7 +27,7 @@ def new_owner(client, role="alumni"):
     return name, job_id
 
 
-def apply_as(client, job_id, username, with_video=True):
+def apply_as(client, job_id, username, with_video=True, identity=False):
     """Register an applicant, upload documents, apply. Returns the application id."""
     as_user(client, username, "applicant")
     cv = upload(client, "cv", "cv.pdf", CV_BYTES).json()["id"]
@@ -35,6 +35,8 @@ def apply_as(client, job_id, username, with_video=True):
     if with_video:
         body["intro_video_document_id"] = upload(client, "intro_video", "v.mp4", VIDEO_BYTES).json()["id"]
         body["consents"] = list(CONSENTS_WITH_VIDEO)
+    if identity:
+        body["consents"].append("identity")
     r = client.post("%s/jobs/%s/apply" % (URL, job_id), json=body)
     assert r.status_code == 201
     return r.json()["id"]
@@ -130,7 +132,7 @@ def test_detail(client):
     assert r.status_code == 200
     d = r.json()
     assert d["job"]["id"] == job_id and d["cover_note"] == "Hello"
-    assert d["identity"] == {"state": "available", "expires_at": None}
+    assert d["identity"] == {"state": "locked", "expires_at": None}  # submitted
     assert "phone" not in d["applicant"] and d["documents"]["cv"]["id"]
     assert [h["to_status"] for h in d["history"]] == ["submitted"]
 
@@ -386,3 +388,68 @@ def test_window_follows_the_configured_days(client, monkeypatch):
     assert client.patch(path, json={"status": "accepted"}).status_code == 200
     accepted_at, expires_at = window_of(app_id)
     assert expires_at - accepted_at == timedelta(days=7)
+
+
+def identity_block(client, app_id):
+    return client.get("%s/applications/%s" % (URL, app_id)).json()["identity"]
+
+
+def test_identity_block_follows_status_and_window(client):
+    _, _, app_id = setup(client, identity=True)
+    path = "%s/applications/%s/status" % (URL, app_id)
+    locked = {"state": "locked", "expires_at": None}
+
+    assert identity_block(client, app_id) == locked  # submitted
+    client.patch(path, json={"status": "shortlisted"})
+    assert identity_block(client, app_id) == locked
+
+    client.patch(path, json={"status": "accepted"})
+    _, expires_at = window_of(app_id)
+    block = identity_block(client, app_id)
+    assert block["state"] == "available"
+    assert datetime.fromisoformat(block["expires_at"]) == expires_at
+
+    # shortlisted again: locked, and the date is hidden while it is locked
+    client.patch(path, json={"status": "shortlisted"})
+    assert identity_block(client, app_id) == locked
+
+    # the window passes (moved in the database; the clock is never advanced)
+    client.patch(path, json={"status": "accepted"})
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE applications SET identity_access_expires_at = now() - interval '1 second' WHERE id = :i"),
+            {"i": app_id},
+        )
+    block = identity_block(client, app_id)
+    assert block["state"] == "expired" and block["expires_at"] is not None
+
+    # accepting again after expiry does not open a new window
+    client.patch(path, json={"status": "shortlisted"})
+    client.patch(path, json={"status": "accepted"})
+    assert identity_block(client, app_id)["state"] == "expired"
+
+
+def test_identity_block_is_locked_without_identity_consent(client):
+    _, _, app_id = setup(client)  # the applicant did not grant identity
+    client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "accepted"})
+    assert window_of(app_id)[1] is not None  # the window exists, but nothing opens
+    assert identity_block(client, app_id) == {"state": "locked", "expires_at": None}
+
+
+def test_revoking_identity_consent_after_acceptance_locks_it(client):
+    owner, _, app_id = setup(client, identity=True)
+    client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "accepted"})
+    assert identity_block(client, app_id)["state"] == "available"
+
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    r = client.patch(
+        "%s/me/applications/%s/consents" % (URL, app_id), json={"revoke": ["identity"]}
+    )
+    assert r.status_code == 200
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+
+    # decision: once the consent is revoked the date is hidden as well
+    assert identity_block(client, app_id) == {"state": "locked", "expires_at": None}
+    assert window_of(app_id)[1] is not None

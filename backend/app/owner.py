@@ -70,6 +70,19 @@ def _visibility(db: Session, rows: list[Application], caller: User) -> dict[uuid
     return {r.id: policy.decide(r.status, scopes[r.id], caller.role) for r in rows}
 
 
+def _identity_access(db: Session, row: Application, user: User) -> tuple[str, datetime | None]:
+    """Identity state for the caller, and the expiry date to show with it."""
+    scopes = consent.active_scopes(db, [row.id])[row.id]
+    state = policy.identity_state(
+        row.status,
+        scopes,
+        row.identity_access_expires_at,
+        datetime.now(timezone.utc),
+        user.role,
+    )
+    return state, policy.shown_expiry(state, row.identity_access_expires_at)
+
+
 def _applicant_views(
     db: Session, rows: list[Application], seen: dict[uuid.UUID, policy.Visibility]
 ) -> dict[uuid.UUID, dict | None]:
@@ -174,7 +187,11 @@ def detail_view(db: Session, row: Application, user: User) -> dict:
     )
     out["job"] = jobs.summaries(db, [db.get(Job, row.job_id)])[0]
     out["cover_note"] = row.cover_note
-    out["identity"] = {"state": "available", "expires_at": None}
+    state, expires_at = _identity_access(db, row, user)
+    out["identity"] = {
+        "state": state,
+        "expires_at": expires_at.isoformat() if expires_at else None,
+    }
     out["history"] = applications.history_of(db, row.id)
     return out
 
