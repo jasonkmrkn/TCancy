@@ -1,7 +1,7 @@
 from sqlalchemy import text
 
 from app.db import engine
-from helpers import make_profile, password_hash
+from helpers import make_alumni_profile, make_profile, password_hash
 
 AUTH = "/api/v1/auth"
 URL = "/api/v1/me/account"
@@ -17,7 +17,10 @@ def register_applicant(client, username="budi"):
 
 
 def register_alumni(client, username="alumna"):
-    r = client.post(AUTH + "/register/alumni", json={"username": username, "password": "rahasia123"})
+    r = client.post(
+        AUTH + "/register/alumni",
+        json={"username": username, "password": "rahasia123", "profile": make_alumni_profile()},
+    )
     assert r.status_code == 201
     return r.json()["id"]
 

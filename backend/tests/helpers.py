@@ -44,6 +44,13 @@ def make_profile(**over):
     return data
 
 
+def make_alumni_profile(**over):
+    """A complete alumni profile, as sent at alumni registration."""
+    data = {"full_name": "Sari Alumni", "company": "Acme", "angkatan": 2015}
+    data.update(over)
+    return data
+
+
 # STUB-RAYNALD
 def login_as(client, username, password="rahasia123"):
     """Log in and return the headers non-GET requests need (CSRF).
