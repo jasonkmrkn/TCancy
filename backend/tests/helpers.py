@@ -18,6 +18,7 @@ def password_hash(password="rahasia123"):
     """
     return security.hash_password(password)
 
+
 def skill_ids(n=2):
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT id FROM skills ORDER BY name LIMIT :n"), {"n": n}).all()
@@ -45,8 +46,10 @@ def make_profile(**over):
 
 # STUB-RAYNALD
 def login_as(client, username, password="rahasia123"):
-    """Frozen interface: log in and return the headers non-GET requests need (CSRF).
+    """Log in and return the headers non-GET requests need (CSRF).
 
-    Stub: returns {} and does not log in yet; tests keep logging in themselves.
+    Frozen interface: the shape is {"X-CSRF-Token": <value of the csrf_token cookie>}.
     """
-    return {}
+    r = client.post("/api/v1/auth/login", json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+    return {"X-CSRF-Token": client.cookies["csrf_token"]}
