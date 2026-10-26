@@ -122,16 +122,20 @@ def _documents_of(db: Session, rows: list[Application]) -> dict[uuid.UUID, Docum
     return {d.id: d for d in db.scalars(select(Document).where(Document.id.in_(ids)))}
 
 
-def _base_view(row: Application, applicant: dict | None, docs: dict[uuid.UUID, Document]) -> dict:
+def _base_view(
+    row: Application,
+    applicant: dict | None,
+    docs: dict[uuid.UUID, Document],
+    seen: policy.Visibility,
+) -> dict:
+    cv = docs.get(row.cv_document_id) if seen.cv else None
+    video = docs.get(row.intro_video_document_id) if seen.video else None
     return {
         "id": str(row.id),
         "status": row.status,
         "created_at": row.created_at.isoformat(),
         "applicant": applicant,
-        "documents": {
-            "cv": _document_view(docs.get(row.cv_document_id)),
-            "video": _document_view(docs.get(row.intro_video_document_id)),
-        },
+        "documents": {"cv": _document_view(cv), "video": _document_view(video)},
     }
 
 
@@ -155,7 +159,7 @@ def list_for_job(db: Session, user: User, job_id: str, limit: int, cursor: str |
     people = _applicant_views(db, page, seen)
     docs = _documents_of(db, page)
     return {
-        "items": [_base_view(r, people[r.id], docs) for r in page],
+        "items": [_base_view(r, people[r.id], docs, seen[r.id]) for r in page],
         "next_cursor": next_cursor,
     }
 
@@ -163,7 +167,10 @@ def list_for_job(db: Session, user: User, job_id: str, limit: int, cursor: str |
 def detail_view(db: Session, row: Application, user: User) -> dict:
     seen = _visibility(db, [row], user)
     out = _base_view(
-        row, _applicant_views(db, [row], seen)[row.id], _documents_of(db, [row])
+        row,
+        _applicant_views(db, [row], seen)[row.id],
+        _documents_of(db, [row]),
+        seen[row.id],
     )
     out["job"] = jobs.summaries(db, [db.get(Job, row.job_id)])[0]
     out["cover_note"] = row.cover_note
@@ -200,12 +207,20 @@ def _file_response(db: Session, doc: Document | None, filename: str) -> Streamin
     )
 
 
-def cv_file(db: Session, row: Application) -> StreamingResponse:
+def _not_visible() -> HTTPException:
+    return HTTPException(status_code=403, detail="NOT_VISIBLE")
+
+
+def cv_file(db: Session, row: Application, user: User) -> StreamingResponse:
+    if not _visibility(db, [row], user)[row.id].cv:
+        raise _not_visible()
     doc = db.get(Document, row.cv_document_id) if row.cv_document_id else None
     return _file_response(db, doc, "cv")
 
 
-def video_file(db: Session, row: Application) -> StreamingResponse:
+def video_file(db: Session, row: Application, user: User) -> StreamingResponse:
+    if not _visibility(db, [row], user)[row.id].video:
+        raise _not_visible()
     doc = db.get(Document, row.intro_video_document_id) if row.intro_video_document_id else None
     return _file_response(db, doc, "intro_video")
 

@@ -41,12 +41,12 @@ def change_status(
 
 @router.get("/applications/{app_id}/cv")
 def download_cv(app_id: str, user: User = Depends(Owner), db: Session = Depends(get_db)):
-    return owner.cv_file(db, owner.get_application(db, user, app_id))
+    return owner.cv_file(db, owner.get_application(db, user, app_id), user)
 
 
 @router.get("/applications/{app_id}/video")
 def download_video(app_id: str, user: User = Depends(Owner), db: Session = Depends(get_db)):
-    return owner.video_file(db, owner.get_application(db, user, app_id))
+    return owner.video_file(db, owner.get_application(db, user, app_id), user)
 
 
 @router.get("/applications/{app_id}/identity")

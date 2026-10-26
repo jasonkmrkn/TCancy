@@ -189,10 +189,10 @@ def test_download_cv_and_video(client):
     assert r.status_code == 200 and r.content == VIDEO_BYTES
 
 
-def test_video_missing_404(client):
+def test_video_without_consent_is_not_visible(client):
     _, _, app_id = setup(client, with_video=False)
     r = client.get("%s/applications/%s/video" % (URL, app_id))
-    assert r.status_code == 404 and r.json()["detail"] == "DOCUMENT_NOT_FOUND"
+    assert r.status_code == 403 and r.json()["detail"] == "NOT_VISIBLE"
 
 
 def test_identity_and_ktp(client):
@@ -257,3 +257,51 @@ def test_applicant_is_null_when_profile_consent_is_revoked(client):
     item = client.get("%s/jobs/%s/applications" % (URL, job_id)).json()["items"][0]
     assert item["applicant"] is None and item["documents"]["cv"] is not None
     assert client.get("%s/applications/%s" % (URL, app_id)).json()["applicant"] is None
+
+
+def test_revoked_cv_consent_hides_cv(client):
+    owner, job_id, app_id = setup(client)
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    r = client.patch(
+        "%s/me/applications/%s/consents" % (URL, app_id), json={"revoke": ["cv"]}
+    )
+    assert r.status_code == 200
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+
+    r = client.get("%s/applications/%s/cv" % (URL, app_id))
+    assert r.status_code == 403 and r.json()["detail"] == "NOT_VISIBLE"
+    assert client.get("%s/applications/%s/video" % (URL, app_id)).status_code == 200
+
+    item = client.get("%s/jobs/%s/applications" % (URL, job_id)).json()["items"][0]
+    assert item["documents"]["cv"] is None and item["documents"]["video"] is not None
+    docs = client.get("%s/applications/%s" % (URL, app_id)).json()["documents"]
+    assert docs["cv"] is None and docs["video"] is not None
+
+
+def test_deleted_video_is_404_only_after_the_consent_check(client):
+    owner, job_id = new_owner(client)
+    app_id = apply_as(client, job_id, "budi")
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+    client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "rejected"})
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    video_id = client.get("%s/me/applications/%s" % (URL, app_id)).json()["intro_video_document_id"]
+    assert client.delete("%s/me/documents/%s" % (URL, video_id)).status_code == 204
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+
+    # consent still active, document gone
+    r = client.get("%s/applications/%s/video" % (URL, app_id))
+    assert r.status_code == 404 and r.json()["detail"] == "DOCUMENT_NOT_FOUND"
+
+    # once the consent is revoked the answer is 403, not 404
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    client.patch("%s/me/applications/%s/consents" % (URL, app_id), json={"revoke": ["video"]})
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+    r = client.get("%s/applications/%s/video" % (URL, app_id))
+    assert r.status_code == 403 and r.json()["detail"] == "NOT_VISIBLE"
