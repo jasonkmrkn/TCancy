@@ -256,7 +256,17 @@ def _ktp_id(db: Session, row: Application) -> str | None:
     return cards[-1]["id"] if cards else None
 
 
-def identity_view(db: Session, row: Application) -> dict:
+def _require_identity(db: Session, row: Application, user: User) -> None:
+    """The identity endpoints open only while the policy says available, like the detail block."""
+    state, _ = _identity_access(db, row, user)
+    if state == policy.IDENTITY_EXPIRED:
+        raise HTTPException(status_code=403, detail="IDENTITY_EXPIRED")
+    if state != policy.IDENTITY_AVAILABLE:
+        raise HTTPException(status_code=403, detail="IDENTITY_LOCKED")
+
+
+def identity_view(db: Session, row: Application, user: User) -> dict:
+    _require_identity(db, row, user)
     return {
         "nik": vault.load_field(db, row.applicant_id, "nik"),
         "address": vault.load_field(db, row.applicant_id, "address"),
@@ -265,7 +275,8 @@ def identity_view(db: Session, row: Application) -> dict:
     }
 
 
-def ktp_file(db: Session, row: Application) -> StreamingResponse:
+def ktp_file(db: Session, row: Application, user: User) -> StreamingResponse:
+    _require_identity(db, row, user)
     ktp_id = _ktp_id(db, row)
     if ktp_id is None:
         raise HTTPException(status_code=404, detail="NO_KTP")

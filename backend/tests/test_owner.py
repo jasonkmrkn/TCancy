@@ -205,9 +205,11 @@ def test_video_without_consent_is_not_visible(client):
 
 def test_identity_and_ktp(client):
     owner, job_id = new_owner(client)
-    app_id = apply_as(client, job_id, "budi", with_video=False)
+    app_id = apply_as(client, job_id, "budi", with_video=False, identity=True)
     client.post(URL + "/auth/logout")
     login(client, owner)
+    r = client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "accepted"})
+    assert r.status_code == 200
     ident = client.get("%s/applications/%s/identity" % (URL, app_id))
     assert ident.status_code == 200
     body = ident.json()
@@ -225,6 +227,36 @@ def test_identity_and_ktp(client):
     r = client.get("%s/applications/%s/identity/ktp" % (URL, app_id))
     assert r.status_code == 200 and r.content == KTP_BYTES
     assert r.headers["content-type"] == "image/png"
+
+
+def test_identity_endpoints_need_acceptance_and_an_open_window(client):
+    owner, job_id = new_owner(client)
+    app_id = apply_as(client, job_id, "budi", with_video=False, identity=True)
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+    base = "%s/applications/%s/identity" % (URL, app_id)
+    path = "%s/applications/%s/status" % (URL, app_id)
+
+    def refused(code):
+        for suffix in ("", "/ktp"):
+            r = client.get(base + suffix)
+            assert r.status_code == 403 and r.json()["detail"] == code
+
+    refused("IDENTITY_LOCKED")  # submitted
+    assert client.patch(path, json={"status": "shortlisted"}).status_code == 200
+    refused("IDENTITY_LOCKED")
+
+    assert client.patch(path, json={"status": "accepted"}).status_code == 200
+    assert client.get(base).status_code == 200
+    assert client.get(base + "/ktp").status_code == 404  # open; no ID card uploaded yet
+
+    # the window passes (moved in the database; the clock is never advanced)
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE applications SET identity_access_expires_at = now() - interval '1 second' WHERE id = :i"),
+            {"i": app_id},
+        )
+    refused("IDENTITY_EXPIRED")
 
 
 def test_deleted_document_clears_reference(client):
