@@ -2,23 +2,58 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import blind_index, vault
 from app.models import AlumniProfile, ApplicantProfile, ApplicantSkill, Skill, User
 from app.schemas import AlumniProfileIn, ApplicantProfileIn
 
+# Personal fields live in the vault (encrypted_fields). The profile rows keep only
+# non-personal columns and the blind indexes used for uniqueness.
+
+
+def conflict_code(exc: IntegrityError) -> str | None:
+    """Map a unique-constraint violation to its API error code, or None for any other error.
+
+    Only the constraint name is read, never the values, so no personal data reaches an error.
+    """
+    diag = getattr(exc.orig, "diag", None)
+    name = getattr(diag, "constraint_name", None) or ""
+    if "email_blind_index" in name:
+        return "EMAIL_TAKEN"
+    if "nik_blind_index" in name:
+        return "NIK_TAKEN"
+    if "username" in name:
+        return "USERNAME_TAKEN"
+    return None
+
+
+def _flush(db: Session) -> None:
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        code = conflict_code(exc)
+        if code is None:
+            raise
+        raise HTTPException(status_code=409, detail=code) from None
+
 
 def check_unique(db: Session, data: ApplicantProfileIn, user_id: uuid.UUID | None = None) -> None:
-    """409 when the email or NIK already belongs to another applicant."""
-    for column, code, value in (
-        (ApplicantProfile.email, "EMAIL_TAKEN", data.email),
-        (ApplicantProfile.nik, "NIK_TAKEN", data.nik),
-    ):
-        query = select(ApplicantProfile.user_id).where(column == value)
-        if user_id is not None:
-            query = query.where(ApplicantProfile.user_id != user_id)
-        if db.scalar(query) is not None:
-            raise HTTPException(status_code=409, detail=code)
+    """409 when the email or NIK already belongs to another applicant (compared by blind index)."""
+    email_query = select(User.id).where(
+        User.email_blind_index == blind_index.compute("email", data.email)
+    )
+    nik_query = select(ApplicantProfile.user_id).where(
+        ApplicantProfile.nik_blind_index == blind_index.compute("nik", data.nik)
+    )
+    if user_id is not None:
+        email_query = email_query.where(User.id != user_id)
+        nik_query = nik_query.where(ApplicantProfile.user_id != user_id)
+    if db.scalar(email_query) is not None:
+        raise HTTPException(status_code=409, detail="EMAIL_TAKEN")
+    if db.scalar(nik_query) is not None:
+        raise HTTPException(status_code=409, detail="NIK_TAKEN")
 
 
 def check_skills(db: Session, skill_ids: list[uuid.UUID]) -> None:
@@ -28,39 +63,33 @@ def check_skills(db: Session, skill_ids: list[uuid.UUID]) -> None:
         raise HTTPException(status_code=422, detail="unknown skill: " + ", ".join(unknown))
 
 
-def _apply(profile: ApplicantProfile, data: ApplicantProfileIn) -> None:
-    profile.full_name = data.full_name
-    profile.email = data.email
-    profile.phone = data.phone
-    profile.nik = data.nik
-    profile.address = data.address
-    profile.birth_date = data.birth_date
-    profile.angkatan = data.angkatan
-    profile.preferred_type = data.preferred_type
-    profile.preferred_location = data.preferred_location
-
-
 def _set_skills(db: Session, user_id: uuid.UUID, skill_ids: list[uuid.UUID]) -> None:
     db.execute(delete(ApplicantSkill).where(ApplicantSkill.user_id == user_id))
     db.add_all([ApplicantSkill(user_id=user_id, skill_id=s) for s in skill_ids])
 
 
-def create_applicant_profile(db: Session, user_id: uuid.UUID, data: ApplicantProfileIn) -> None:
-    profile = ApplicantProfile(user_id=user_id)
-    _apply(profile, data)
+def _save_applicant(
+    db: Session, user: User, profile: ApplicantProfile, data: ApplicantProfileIn
+) -> None:
+    user.email_blind_index = blind_index.compute("email", data.email)
+    profile.nik_blind_index = blind_index.compute("nik", data.nik)
+    profile.angkatan = data.angkatan
+    profile.preferred_type = data.preferred_type
+    profile.preferred_location = data.preferred_location
     db.add(profile)
-    db.flush()
-    _set_skills(db, user_id, data.skill_ids)
-
-
-def replace_applicant_profile(db: Session, user: User, data: ApplicantProfileIn) -> None:
-    profile = db.get(ApplicantProfile, user.id)
-    if profile is None:
-        create_applicant_profile(db, user.id, data)
-        return
-    _apply(profile, data)
-    db.flush()
+    _flush(db)
+    personal = {
+        "full_name": data.full_name,
+        "email": data.email,
+        "phone": data.phone,
+        "nik": data.nik,
+        "address": data.address,
+        "birth_date": data.birth_date.isoformat(),
+    }
+    for field, value in personal.items():
+        vault.store_field(db, user.id, field, value)
     _set_skills(db, user.id, data.skill_ids)
+    db.flush()
 
 
 def applicant_profile_out(db: Session, user: User) -> dict:
@@ -75,12 +104,12 @@ def applicant_profile_out(db: Session, user: User) -> dict:
     ).all()
     return {
         "role": "applicant",
-        "full_name": profile.full_name,
-        "email": profile.email,
-        "phone": profile.phone,
-        "nik": profile.nik,
-        "address": profile.address,
-        "birth_date": profile.birth_date.isoformat(),
+        "full_name": vault.load_field(db, user.id, "full_name"),
+        "email": vault.load_field(db, user.id, "email"),
+        "phone": vault.load_field(db, user.id, "phone"),
+        "nik": vault.load_field(db, user.id, "nik"),
+        "address": vault.load_field(db, user.id, "address"),
+        "birth_date": vault.load_field(db, user.id, "birth_date"),
         "angkatan": profile.angkatan,
         "skills": [{"id": str(i), "name": n} for i, n in skills],
         "preferred_type": profile.preferred_type,
@@ -97,13 +126,14 @@ def get_alumni_profile(db: Session, user_id: uuid.UUID) -> AlumniProfile:
     return profile
 
 
-def alumni_profile_complete(profile: AlumniProfile) -> bool:
-    return bool(profile.full_name and profile.company and profile.angkatan)
+def alumni_profile_complete(profile: AlumniProfile, full_name: str | None) -> bool:
+    return bool(full_name and profile.company and profile.angkatan)
 
 
 def replace_alumni_profile(db: Session, user: User, data: AlumniProfileIn) -> None:
     profile = get_alumni_profile(db, user.id)
-    profile.full_name = data.full_name
+    # The vault has no delete, so a cleared name is stored as "" and read back as None.
+    vault.store_field(db, user.id, "full_name", data.full_name or "")
     profile.company = data.company
     profile.angkatan = data.angkatan
     if profile.rejected_at is not None:
@@ -122,28 +152,27 @@ def alumni_verification(user: User, profile: AlumniProfile) -> dict:
 
 def alumni_profile_out(db: Session, user: User) -> dict:
     profile = get_alumni_profile(db, user.id)
+    full_name = display_name(db, user.id)
     return {
         "role": "alumni",
-        "full_name": profile.full_name,
+        "full_name": full_name,
         "company": profile.company,
         "angkatan": profile.angkatan,
-        "profile_complete": alumni_profile_complete(profile),
+        "profile_complete": alumni_profile_complete(profile, full_name),
         "verification": alumni_verification(user, profile),
     }
 
 
-# STUB-JASON
 def create_applicant(db: Session, user: User, data: ApplicantProfileIn) -> None:
     """Frozen interface: create the applicant profile and its skills at registration.
 
     422 for an unknown skill, 409 EMAIL_TAKEN / NIK_TAKEN. The caller commits.
     """
     check_skills(db, data.skill_ids)
-    check_unique(db, data)
-    create_applicant_profile(db, user.id, data)
+    check_unique(db, data, user.id)
+    _save_applicant(db, user, ApplicantProfile(user_id=user.id), data)
 
 
-# STUB-JASON
 def create_alumni(db: Session, user: User, data: AlumniProfileIn | None) -> None:
     """Frozen interface: create the alumni profile row at registration.
 
@@ -154,7 +183,6 @@ def create_alumni(db: Session, user: User, data: AlumniProfileIn | None) -> None
         replace_alumni_profile(db, user, data)
 
 
-# STUB-JASON
 def read(db: Session, user: User) -> dict:
     """Frozen interface: the body of GET /me/profile for the user's role."""
     if user.role == "alumni":
@@ -162,7 +190,6 @@ def read(db: Session, user: User) -> dict:
     return applicant_profile_out(db, user)
 
 
-# STUB-JASON
 def update(db: Session, user: User, data: ApplicantProfileIn | AlumniProfileIn) -> dict:
     """Frozen interface: PUT /me/profile. `data` is the body already parsed for the user's role.
 
@@ -173,14 +200,11 @@ def update(db: Session, user: User, data: ApplicantProfileIn | AlumniProfileIn) 
         return alumni_profile_out(db, user)
     check_skills(db, data.skill_ids)
     check_unique(db, data, user.id)
-    replace_applicant_profile(db, user, data)
+    profile = db.get(ApplicantProfile, user.id) or ApplicantProfile(user_id=user.id)
+    _save_applicant(db, user, profile, data)
     return applicant_profile_out(db, user)
 
 
-# STUB-JASON
 def display_name(db: Session, user_id: uuid.UUID) -> str | None:
     """Frozen interface: the user's full name, for testimonials and admin lists."""
-    name = db.scalar(select(ApplicantProfile.full_name).where(ApplicantProfile.user_id == user_id))
-    if name is None:
-        name = db.scalar(select(AlumniProfile.full_name).where(AlumniProfile.user_id == user_id))
-    return name
+    return vault.load_field(db, user_id, "full_name") or None
