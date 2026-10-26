@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from python_multipart.multipart import MultipartParser, parse_options_header
 from sqlalchemy.orm import Session
 
-from app import audit, clientip, documents
+from app import audit, documents
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
@@ -110,8 +110,8 @@ def _audit(db: Session, request: Request, user: User, action: str, doc_id, doc_t
     audit.record(
         db, actor_id=user.id, actor_role=user.role, action=action,
         target_type="document", target_id=doc_id,
-        ip=clientip.client_ip(request), user_agent=request.headers.get("user-agent"),
-        details={"type": doc_type, "size": size},
+        details=audit.details(size=size, **{doc_type: 1}),
+        **audit.client(request),
     )
     db.commit()
 
