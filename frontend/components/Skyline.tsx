@@ -27,7 +27,7 @@ export default function Skyline() {
             aria-hidden
             viewBox={`0 0 800 ${VIEW_H}`}
             preserveAspectRatio="xMidYMax slice"
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-[44%] w-full"
+            className="pointer-events-none relative -mx-10 -mb-10 mt-auto h-44 w-[calc(100%+5rem)] max-w-none shrink-0"
         >
             <defs>
                 <linearGradient id="skyline-body" x1="0" y1="0" x2="0" y2="1">

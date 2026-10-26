@@ -28,7 +28,7 @@ function Aside() {
                 <span className="h-1.5 w-1.5 rounded-[2px] bg-emerald-500" />
             </div>
 
-            <h2 className="relative mt-16 max-w-[17ch] text-4xl font-semibold leading-[1.05] tracking-tighter">
+            <h2 className="relative mt-8 max-w-[17ch] text-4xl font-semibold leading-[1.05] tracking-tighter">
                 Vacancies posted by the alumni who came before you.
             </h2>
 

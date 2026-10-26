@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Info } from '@phosphor-icons/react';
 import AuthShell, { stagger } from '@/components/AuthShell';
-import FormField, { FormAlert, inputClass, primaryButtonClass } from '@/components/FormField';
+import FormField, { FormAlert, inputClass, primaryButtonClass, textareaClass } from '@/components/FormField';
 import PasswordInput from '@/components/PasswordInput';
-import { api, ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { auth as authApi, skills as skillsApi, type JobType, type Skill } from '@/lib/endpoints';
 
-type Skill = { id: string; name: string };
 type Kind = 'applicant' | 'alumni';
 type SkillsState = 'loading' | 'ready' | 'error';
 
@@ -55,7 +55,7 @@ function mapFields(err: ApiError): Record<string, string> {
 const SECTION = 'text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500';
 const CHIP =
   'rounded-full border px-4 py-2 text-sm transition duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] active:translate-y-[1px] active:scale-[0.98] ' +
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600';
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900';
 
 function Chip({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -64,8 +64,8 @@ function Chip({ selected, onClick, children }: { selected: boolean; onClick: () 
       aria-pressed={selected}
       onClick={onClick}
       className={`${CHIP} ${selected
-          ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-          : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400'
+        ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
+        : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400'
         }`}
     >
       {children}
@@ -103,7 +103,8 @@ export default function RegisterPage() {
 
   const loadSkills = useCallback(() => {
     setSkillsState('loading');
-    api<Skill[]>('/skills')
+    skillsApi
+      .list()
       .then((list) => {
         setSkills(list);
         setSkillsState('ready');
@@ -168,25 +169,22 @@ export default function RegisterPage() {
     const username = form.username.trim().toLowerCase();
     try {
       if (kind === 'alumni') {
-        await api('/auth/register/alumni', { method: 'POST', body: { username, password: form.password } });
+        await authApi.registerAlumni({ username, password: form.password });
       } else {
-        await api('/auth/register', {
-          method: 'POST',
-          body: {
-            username,
-            password: form.password,
-            profile: {
-              full_name: form.full_name.trim(),
-              email: form.email.trim(),
-              phone: form.phone,
-              nik: form.nik,
-              address: form.address.trim(),
-              birth_date: form.birth_date,
-              angkatan: Number(form.angkatan),
-              skill_ids: skillIds,
-              preferred_type: form.preferred_type || null,
-              preferred_location: form.preferred_location.trim() || null,
-            },
+        await authApi.register({
+          username,
+          password: form.password,
+          profile: {
+            full_name: form.full_name.trim(),
+            email: form.email.trim(),
+            phone: form.phone,
+            nik: form.nik,
+            address: form.address.trim(),
+            birth_date: form.birth_date,
+            angkatan: Number(form.angkatan),
+            skill_ids: skillIds,
+            preferred_type: (form.preferred_type || null) as JobType | null,
+            preferred_location: form.preferred_location.trim() || null,
           },
         });
       }
@@ -327,7 +325,7 @@ export default function RegisterPage() {
               </FormField>
             </div>
             <FormField label="Address" error={fields.address}>
-              <textarea className={inputClass} rows={3} value={form.address} onChange={set('address')} autoComplete="street-address" />
+              <textarea className={textareaClass} rows={3} value={form.address} onChange={set('address')} autoComplete="street-address" />
             </FormField>
             <div className="grid items-start gap-5 sm:grid-cols-2">
               <FormField label="Class year" error={fields.angkatan} hint={`Year of entry, between 1990 and ${THIS_YEAR}.`}>
