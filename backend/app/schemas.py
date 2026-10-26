@@ -162,6 +162,26 @@ class AlumniProfileIn(BaseModel):
         return self
 
 
+class AlumniRegisterProfileIn(AlumniProfileIn):
+    """Profile sent at alumni registration: all three fields are required."""
+
+    full_name: str
+    company: str
+    angkatan: int
+
+    @model_validator(mode="after")
+    def check_required(self):
+        # AlumniProfileIn turns blank text into None, so reject both None and blank.
+        for name in ("full_name", "company"):
+            if not (getattr(self, name) or "").strip():
+                raise ValueError(name + " must not be blank")
+        return self
+
+
+class AlumniRegisterWithProfileIn(AlumniRegisterIn):
+    profile: AlumniRegisterProfileIn
+
+
 JOB_TYPES = ("internship", "fulltime", "parttime", "contract")
 WORK_MODES = ("onsite", "hybrid", "remote")
 
