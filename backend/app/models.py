@@ -334,6 +334,8 @@ class EncryptedField(Base):
     salt: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # HMAC tag of the ciphertext (app.integrity); a field is one chunk, so it lives on the row.
+    tag: Mapped[bytes | None] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
