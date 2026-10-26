@@ -12,6 +12,7 @@ from app import config, csrf, tokens
 
 from app.db import get_db
 from app.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware, add_security_headers
+from app.origin import OriginCheckMiddleware
 from app.ratelimit import RateLimitUnavailable
 from app.routers import account as account_router
 from app.routers import admin as admin_router
@@ -53,6 +54,7 @@ app.add_middleware(
     default_limit=1 * MiB,
     limits={("POST", "/api/v1/me/documents"): 51 * MiB},  # 50 MiB video + form overhead
 )
+app.add_middleware(OriginCheckMiddleware, allowed_origin=config.FRONTEND_ORIGIN)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[config.FRONTEND_ORIGIN],
