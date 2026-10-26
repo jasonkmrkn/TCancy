@@ -30,6 +30,8 @@ services:
       UPLOAD_DIR: /app/uploads
       SESSION_SECRET: ${SESSION_SECRET:?isi SESSION_SECRET di backend/.env (openssl rand -hex 32)}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      MASTER_KEY: ${MASTER_KEY:?isi MASTER_KEY di backend/.env (openssl rand -base64 32)}
+      BLIND_INDEX_KEY: ${BLIND_INDEX_KEY:?isi BLIND_INDEX_KEY di backend/.env (openssl rand -hex 32)}
     ports:
       - "8010:8000"
     volumes:
