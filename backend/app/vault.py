@@ -4,6 +4,10 @@ Each field is encrypted with its own key (app.crypto, item "<field>:<user_id>").
 ENCRYPTION_POLICY=assignment every write keeps three copies (aes, des, rc4); with production
 only aes. Reads always use the aes copy. Copies left over from an earlier policy stay as they are.
 
+Every copy carries an integrity tag (app.integrity), checked on read when INTEGRITY_MODE is not
+off. This is the only module that imports app.integrity; documents reaches it through the
+*_file wrappers at the end.
+
 Transaction rule: these functions only flush; the caller commits.
 """
 import uuid
@@ -11,7 +15,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config, crypto
+from app import config, crypto, integrity
 from app.models import EncryptedField
 
 ALGORITHMS = ("aes", "des", "rc4")
@@ -28,7 +32,13 @@ def _algorithms() -> tuple[str, ...]:
 
 def _decrypt(row: EncryptedField) -> str:
     item = _item(row.field_name, row.user_id)
-    return crypto.aes_decrypt(bytes(row.ciphertext), row.salt, row.nonce, item, 0).decode()
+    ciphertext = bytes(row.ciphertext)
+    if integrity.enabled():
+        ok, _ = integrity.verify([ciphertext], [row.tag] if row.tag else [], "aes", item, row.salt, row.nonce)
+        if not ok:
+            integrity.fail("field %s of user %s" % (row.field_name, row.user_id))
+    # errors="replace": under log-only a tampered value still comes back instead of crashing.
+    return crypto.aes_decrypt(ciphertext, row.salt, row.nonce, item, 0).decode(errors="replace")
 
 
 def store_field(db: Session, user_id: uuid.UUID, field: str, value: str) -> None:
@@ -39,7 +49,8 @@ def store_field(db: Session, user_id: uuid.UUID, field: str, value: str) -> None
     # Encrypt every copy before touching the database, so a crypto failure writes nothing.
     for alg in _algorithms():
         salt, nonce = crypto.new_params(alg, item)
-        copies[alg] = (salt, nonce, _ENCRYPT[alg](data, salt, nonce, item, 0))
+        ciphertext = _ENCRYPT[alg](data, salt, nonce, item, 0)
+        copies[alg] = (salt, nonce, ciphertext, integrity.tag(alg, item, salt, nonce, 0, True, ciphertext))
     rows = {
         r.algorithm: r
         for r in db.scalars(
@@ -52,12 +63,12 @@ def store_field(db: Session, user_id: uuid.UUID, field: str, value: str) -> None
     }
     # A savepoint, so a failed flush leaves no half-written copies and the caller's transaction intact.
     with db.begin_nested():
-        for alg, (salt, nonce, ciphertext) in copies.items():
+        for alg, (salt, nonce, ciphertext, tag) in copies.items():
             row = rows.get(alg)
             if row is None:
                 row = EncryptedField(user_id=user_id, field_name=field, algorithm=alg)
                 db.add(row)
-            row.salt, row.nonce, row.ciphertext = salt, nonce, ciphertext
+            row.salt, row.nonce, row.ciphertext, row.tag = salt, nonce, ciphertext, tag
 
 
 def load_field(db: Session, user_id: uuid.UUID, field: str) -> str | None:
@@ -82,3 +93,19 @@ def load_fields(db: Session, user_ids: list[uuid.UUID], field: str) -> dict:
         )
     )
     return {row.user_id: _decrypt(row) for row in rows}
+
+
+# Integrity for documents, which may not import app.integrity itself.
+
+def integrity_enabled() -> bool:
+    return integrity.enabled()
+
+
+def tag_file_chunk(alg: str, item: str, salt: bytes, nonce: bytes | None, index: int, last: bool, ciphertext: bytes) -> bytes:
+    return integrity.tag(alg, item, salt, nonce, index, last, ciphertext)
+
+
+def verify_file(chunks, tags: list[bytes], alg: str, item: str, salt: bytes, nonce: bytes | None, what: str) -> None:
+    ok, _ = integrity.verify(chunks, tags, alg, item, salt, nonce)
+    if not ok:
+        integrity.fail(what)

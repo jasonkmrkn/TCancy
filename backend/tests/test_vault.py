@@ -194,7 +194,9 @@ def test_failed_flush_rolls_back_every_copy(db, user, policy, monkeypatch):
     vault.store_field(db, existing, "nik", "1111222233334444")
     db.commit()
     # A None ciphertext breaks NOT NULL on the last copy, after aes and des were queued.
+    # The integrity tag cannot be computed over None, so it is stubbed to reach the flush.
     monkeypatch.setitem(vault._ENCRYPT, "rc4", lambda *args: None)
+    monkeypatch.setattr(vault.integrity, "tag", lambda *args: b"tag")
     for uid in (fresh, existing):
         with pytest.raises(IntegrityError):
             vault.store_field(db, uid, "nik", APPLICANT["nik"])

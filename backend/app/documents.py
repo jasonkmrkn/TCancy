@@ -12,8 +12,8 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from app import config, crypto, filetype, storage
-from app.models import Application, Document, DocumentCopy, User
+from app import config, crypto, filetype, storage, vault
+from app.models import Application, Document, DocumentCopy, IntegrityTag, User
 
 MiB = 1024 * 1024
 CHUNK_SIZE = crypto.CHUNK_SIZE
@@ -88,16 +88,23 @@ def _rechunk(pieces):
         yield bytes(buf)
 
 
-def _encrypt(chunks, alg: str, salt: bytes, nonce: bytes | None, item: str):
-    for index, chunk in enumerate(chunks):
+def _encrypt(chunks, alg: str, salt: bytes, nonce: bytes | None, item: str, tags: list[bytes]):
+    """Encrypt chunk by chunk, appending each ciphertext chunk's integrity tag to `tags`."""
+    it = iter(chunks)
+    chunk = next(it, None)
+    index = 0
+    while chunk is not None:
+        following = next(it, None)  # one ahead, so the last chunk's tag says it is the last
         ciphertext = _ENCRYPT[alg](chunk, salt, nonce, item, index)
-        # A4: integrity tag for this ciphertext chunk goes here.
+        tags.append(vault.tag_file_chunk(alg, item, salt, nonce, index, following is None, ciphertext))
         yield ciphertext
+        chunk = following
+        index += 1
 
 
 def _decrypt(pieces, alg: str, salt: bytes, nonce: bytes | None, item: str):
+    # Integrity is checked by stream() over the whole copy before this runs.
     for index, chunk in enumerate(_rechunk(pieces)):
-        # A4: verify this chunk's integrity tag here before decrypting.
         yield _DECRYPT[alg](chunk, salt, nonce, item, index)
 
 
@@ -185,6 +192,7 @@ def put(db: Session, owner_id: uuid.UUID, doc_type: str, filename: str | None, s
     doc_id = uuid.uuid4()
     item = _item(doc_id)
     copies = []
+    tag_rows = []
     try:
         for alg in _algorithms():
             salt, nonce = crypto.new_params(alg, item)
@@ -193,14 +201,18 @@ def put(db: Session, owner_id: uuid.UUID, doc_type: str, filename: str | None, s
             else:
                 aes = copies[0]
                 source = _decrypt(storage.read(aes.storage_key), "aes", aes.salt, aes.nonce, item)
-            key = storage.write(_encrypt(source, alg, salt, nonce, item))
-            copies.append(DocumentCopy(
-                document_id=doc_id, algorithm=alg, salt=salt, nonce=nonce,
+            tags = []
+            key = storage.write(_encrypt(source, alg, salt, nonce, item, tags))
+            copy = DocumentCopy(
+                id=uuid.uuid4(), document_id=doc_id, algorithm=alg, salt=salt, nonce=nonce,
                 storage_key=key, chunk_size=CHUNK_SIZE, ciphertext_size=size,
-            ))
+            )
+            copies.append(copy)
+            tag_rows += [IntegrityTag(document_copy_id=copy.id, chunk_index=i, tag=t) for i, t in enumerate(tags)]
         doc = Document(id=doc_id, owner_id=user.id, type=doc_type, ext=ext, size_bytes=size)
         db.add(doc)
         db.add_all(copies)
+        db.add_all(tag_rows)
         replaced = old if doc_type == "ktp" else []
         old_keys = _copy_keys(db, Document.id.in_([r.id for r in replaced])) if replaced else []
         for r in replaced:
@@ -239,8 +251,10 @@ def stream(db: Session, document_id, *, algorithm="aes"):
 
     404 DOCUMENT_NOT_FOUND when the document or its copy for `algorithm` is missing (des and rc4
     under the production policy). 500 STORAGE_ERROR when the file cannot be read; the first read
-    happens here, before any response starts. The iterator holds only plain values, so it keeps
-    working after the database session is closed.
+    happens here, before any response starts. Unless INTEGRITY_MODE is off, the whole copy is
+    checked against its tags first (500 INTEGRITY_ERROR under enforce), so a bad chunk never
+    starts a response. The iterator holds only plain values, so it keeps working after the
+    database session is closed.
     """
     doc = get_meta(db, document_id)
     if doc is None:
@@ -250,6 +264,18 @@ def stream(db: Session, document_id, *, algorithm="aes"):
     ))
     if copy is None:
         raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
+    if vault.integrity_enabled():
+        tags = list(db.scalars(
+            select(IntegrityTag.tag).where(IntegrityTag.document_copy_id == copy.id).order_by(IntegrityTag.chunk_index)
+        ))
+        what = "document %s copy %s (%s)" % (doc.id, copy.id, algorithm)
+        try:
+            vault.verify_file(
+                _rechunk(storage.read(copy.storage_key)), tags,
+                algorithm, _item(doc.id), copy.salt, copy.nonce, what,
+            )
+        except storage.StorageError:
+            raise HTTPException(status_code=500, detail="STORAGE_ERROR")
     pieces = storage.read(copy.storage_key)
     try:
         first = next(pieces, b"")
