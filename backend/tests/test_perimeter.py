@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app import config
 from app.main import app
 from app.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
-from helpers import login_as, make_profile
+from helpers import login_as, make_alumni_profile, make_profile
 
 AUTH = "/api/v1/auth"
 UPLOADS = "/api/v1/me/documents"
@@ -556,7 +556,7 @@ def test_the_nik_and_email_of_a_rejected_profile_do_not_come_back(client):
 
 
 def test_the_shape_the_front_end_reads_is_unchanged(client):
-    r = client.post(AUTH + "/register/alumni", json={"username": "budi", "password": "pw"})
+    r = client.post(AUTH + "/register/alumni", json={"username": "budi", "password": "pw", "profile": make_alumni_profile()})
     assert r.status_code == 422
     assert r.json() == {
         "detail": [
