@@ -12,6 +12,8 @@ assert _db_name.endswith("_test"), "TEST_DATABASE_URL must point to a database e
 
 os.environ.setdefault("SESSION_SECRET", "test-only-secret-not-for-production-use-0123456789")
 os.environ.setdefault("COOKIE_SECURE", "false")
+os.environ.setdefault("MASTER_KEY", "dGNhbmN5LXRlc3QtbWFzdGVyLWtleS0wMTIzNDU2Nzg=")
+os.environ.setdefault("BLIND_INDEX_KEY", "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f")
 os.environ["DATABASE_URL"] = _test_url
 _upload_dir = tempfile.mkdtemp(prefix="tcancy_uploads_")
 os.environ["UPLOAD_DIR"] = _upload_dir
