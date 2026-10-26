@@ -38,3 +38,43 @@ def delete(key: str) -> None:
         _path(key).unlink()
     except OSError:
         pass
+
+CHUNK_SIZE = 64 * 1024
+
+
+# STUB-RAYNALD
+def write(chunks) -> str:
+    """Frozen interface: write an iterable of bytes atomically and return the storage key.
+
+    The key is a bare UUID hex with no extension: the extension lives in documents.ext and
+    nothing reads it from the key. Data goes to a temporary file first and os.replace moves
+    it into place, so a failed write never leaves a half-written key behind.
+    Raises StorageError on any OS error.
+    """
+    key = uuid.uuid4().hex
+    tmp = _path(key + ".tmp")
+    try:
+        os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+        with open(tmp, "wb") as f:
+            for chunk in chunks:
+                f.write(chunk)
+        os.replace(tmp, _path(key))
+    except OSError as e:
+        raise StorageError(str(e)) from e
+    finally:
+        tmp.unlink(missing_ok=True)
+    return key
+
+
+# STUB-RAYNALD
+def read(storage_key: str):
+    """Frozen interface: iterate the stored bytes in 64 KiB chunks.
+
+    Raises StorageError, on first iteration, when the key cannot be read.
+    """
+    try:
+        with open(_path(storage_key), "rb") as f:
+            while chunk := f.read(CHUNK_SIZE):
+                yield chunk
+    except OSError as e:
+        raise StorageError(str(e)) from e

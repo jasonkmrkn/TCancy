@@ -130,3 +130,57 @@ def alumni_profile_out(db: Session, user: User) -> dict:
         "profile_complete": alumni_profile_complete(profile),
         "verification": alumni_verification(user, profile),
     }
+
+
+# STUB-JASON
+def create_applicant(db: Session, user: User, data: ApplicantProfileIn) -> None:
+    """Frozen interface: create the applicant profile and its skills at registration.
+
+    422 for an unknown skill, 409 EMAIL_TAKEN / NIK_TAKEN. The caller commits.
+    """
+    check_skills(db, data.skill_ids)
+    check_unique(db, data)
+    create_applicant_profile(db, user.id, data)
+
+
+# STUB-JASON
+def create_alumni(db: Session, user: User, data: AlumniProfileIn | None) -> None:
+    """Frozen interface: create the alumni profile row at registration.
+
+    `data` may be None, as registration sends no profile data today. The caller commits.
+    """
+    get_alumni_profile(db, user.id)
+    if data is not None:
+        replace_alumni_profile(db, user, data)
+
+
+# STUB-JASON
+def read(db: Session, user: User) -> dict:
+    """Frozen interface: the body of GET /me/profile for the user's role."""
+    if user.role == "alumni":
+        return alumni_profile_out(db, user)
+    return applicant_profile_out(db, user)
+
+
+# STUB-JASON
+def update(db: Session, user: User, data: ApplicantProfileIn | AlumniProfileIn) -> dict:
+    """Frozen interface: PUT /me/profile. `data` is the body already parsed for the user's role.
+
+    Same errors as create_applicant for applicants. The caller commits.
+    """
+    if user.role == "alumni":
+        replace_alumni_profile(db, user, data)
+        return alumni_profile_out(db, user)
+    check_skills(db, data.skill_ids)
+    check_unique(db, data, user.id)
+    replace_applicant_profile(db, user, data)
+    return applicant_profile_out(db, user)
+
+
+# STUB-JASON
+def display_name(db: Session, user_id: uuid.UUID) -> str | None:
+    """Frozen interface: the user's full name, for testimonials and admin lists."""
+    name = db.scalar(select(ApplicantProfile.full_name).where(ApplicantProfile.user_id == user_id))
+    if name is None:
+        name = db.scalar(select(AlumniProfile.full_name).where(AlumniProfile.user_id == user_id))
+    return name

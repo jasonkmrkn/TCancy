@@ -54,5 +54,5 @@ def delete_document(
     user: User = Depends(require_role("applicant")),
     db: Session = Depends(get_db),
 ):
-    documents.delete(db, user, doc_id)
+    documents.delete_for_user(db, user, doc_id)
     return Response(status_code=204)
