@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import applications, consent, matching, policy
+from app import applications, config, consent, matching, policy
 from app.models import Application, Document, Job, User
 
 APPLICATION_STATUSES = ("submitted", "shortlisted", "accepted", "rejected", "withdrawn")
@@ -94,8 +94,21 @@ def owner_dashboard(db: Session, user: User) -> dict:
             Application.created_at >= since,
         )
     )
+    soon = datetime.now(timezone.utc) + timedelta(days=config.ACCESS_REMINDER_DAYS)
+    ending = [
+        {
+            "application_id": str(a.id),
+            "job_id": str(job.id),
+            "job_title": job.title,
+            "expires_at": a.identity_access_expires_at.isoformat(),
+        }
+        for a, job in _open_windows(
+            db, Job.owner_id == user.id, Application.identity_access_expires_at <= soon
+        )
+    ]
     return {
         "jobs": _counts(job_rows, ("open", "closed")),
         "applications": _counts(statuses, APPLICATION_STATUSES),
         "new_applications": new or 0,
+        "identity_windows_ending_soon": ending,
     }
