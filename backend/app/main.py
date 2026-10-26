@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app import tokens
+from app import csrf, tokens
 
 from app.db import get_db
 from app.ratelimit import RateLimitUnavailable
@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):
     tokens.check_secret()
     yield
 
-app = FastAPI(title="TCancy", lifespan=lifespan)
+app = FastAPI(title="TCancy", lifespan=lifespan, dependencies=[Depends(csrf.verify_csrf)])
 app.include_router(auth_router.router)
 app.include_router(profile_router.router)
 app.include_router(account_router.router)

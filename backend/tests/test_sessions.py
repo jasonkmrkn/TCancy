@@ -47,6 +47,8 @@ def put_cookie(client, name, value, path="/"):
 
 def put_refresh(client, value):
     put_cookie(client, "refresh_token", value, auth.REFRESH_COOKIE_PATH)
+    if not any(c.name == "csrf_token" for c in client.cookies.jar):
+        put_cookie(client, "csrf_token", "chosen-by-the-caller")
 
 
 def sql(statement, **params):
@@ -87,9 +89,10 @@ def cleared_cookies(response):
 
 def assert_cookies_cleared(response):
     gone = cleared_cookies(response)
-    assert set(gone) == {"access_token", "refresh_token"}
+    assert set(gone) == {"access_token", "refresh_token", "csrf_token"}
     assert "Path=/;" in gone["access_token"] + ";"
     assert "Path=/api/v1/auth" in gone["refresh_token"]
+    assert "Path=/;" in gone["csrf_token"] + ";" and "HttpOnly" not in gone["csrf_token"]
 
 
 # --- cookie flags --------------------------------------------------------------
@@ -112,11 +115,11 @@ def test_secure_flag_follows_config(client, monkeypatch):
     r = sign_in(client)
     for header in r.headers.get_list("set-cookie"):
         assert "Secure" in header
-    # Clearing must repeat the flag, or browsers may refuse to remove the cookie.
     out = client.post(BASE + "/logout")
     assert_cookies_cleared(out)
-    for header in cleared_cookies(out).values():
-        assert "Secure" in header and "HttpOnly" in header and "SameSite=lax" in header
+    for name, header in cleared_cookies(out).items():
+        assert "Secure" in header and "SameSite=lax" in header
+        assert ("HttpOnly" in header) == (name != "csrf_token")
 
 
 def test_refresh_cookie_is_only_sent_to_auth_endpoints(client):

@@ -25,6 +25,23 @@ from app.db import engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Base  # noqa: E402
 
+_UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_plain_request = TestClient.request
+
+
+def _request_with_csrf(self, method, url, *args, **kwargs):
+    if getattr(self, "auto_csrf", True) and method.upper() in _UNSAFE_METHODS:
+        headers = dict(kwargs.get("headers") or {})
+        if not any(name.lower() == "x-csrf-token" for name in headers):
+            token = next((c.value for c in self.cookies.jar if c.name == "csrf_token"), None)
+            if token:
+                headers["X-CSRF-Token"] = token
+        kwargs["headers"] = headers
+    return _plain_request(self, method, url, *args, **kwargs)
+
+
+TestClient.request = _request_with_csrf
+
 
 @pytest.fixture(scope="session", autouse=True)
 def schema():

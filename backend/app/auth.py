@@ -11,6 +11,7 @@ from app.models import RefreshToken, User
 
 ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
+CSRF_COOKIE = "csrf_token"
 # The refresh cookie is only sent to the auth endpoints, never to the rest of the API.
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
@@ -28,7 +29,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str, csrf_token: str ) -> None:
     common = dict(httponly=True, secure=config.COOKIE_SECURE, samesite="lax")
     response.set_cookie(
         ACCESS_COOKIE, access_token, max_age=config.ACCESS_TOKEN_MINUTES * 60, path="/", **common
@@ -40,12 +41,22 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
         path=REFRESH_COOKIE_PATH,
         **common,
     )
+    response.set_cookie(
+        CSRF_COOKIE,
+        csrf_token,
+        max_age=config.REFRESH_TOKEN_DAYS * 24 * 3600,
+        path="/",
+        httponly=False,
+        secure=config.COOKIE_SECURE,
+        samesite="lax",
+    )
 
 
 def clear_auth_cookies(response: Response) -> None:
     common = dict(httponly=True, secure=config.COOKIE_SECURE, samesite="lax")
     response.delete_cookie(ACCESS_COOKIE, path="/", **common)
     response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH, **common)
+    response.delete_cookie(CSRF_COOKIE, path="/", httponly=False, secure=config.COOKIE_SECURE, samesite="lax")
 
 
 def _new_refresh_row(user_id: uuid.UUID, family_id: uuid.UUID, now: datetime):

@@ -1,12 +1,10 @@
-from urllib import response
-
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import auth, profiles, security
+from app import auth, csrf, profiles, security
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import User
@@ -73,12 +71,13 @@ def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
     if security.needs_rehash(user.password_hash):
         user.password_hash = security.hash_password(body.password)
     access_token, refresh_token = auth.start_session(db, user)
-    auth.set_auth_cookies(response, access_token, refresh_token)
+    auth.set_auth_cookies(response, access_token, refresh_token, csrf.new_csrf_token())
     return user_out(user)
 
 @router.post("/refresh")
 def refresh(
     refresh_token: str | None = Cookie(default=None, alias=auth.REFRESH_COOKIE),
+    csrf_token: str | None = Cookie(default=None, alias=auth.CSRF_COOKIE),
     db: Session = Depends(get_db),
 ):
     try:
@@ -88,7 +87,7 @@ def refresh(
     except auth.InvalidRefreshToken:
         return _refresh_failed(401, "invalid refresh token")
     ok = JSONResponse({"ok": True})
-    auth.set_auth_cookies(ok, access_token, new_refresh_token)
+    auth.set_auth_cookies(ok, access_token, new_refresh_token, csrf_token or csrf.new_csrf_token())
     return ok
 
 @router.post("/logout")
