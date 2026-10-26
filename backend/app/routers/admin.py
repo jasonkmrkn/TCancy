@@ -1,9 +1,9 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from app import admin
+from app import admin, auditing
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
@@ -26,13 +26,19 @@ def list_alumni(
 
 
 @router.post("/alumni/{user_id}/approve")
-def approve(user_id: str, user: User = Depends(Admin), db: Session = Depends(get_db)):
-    return admin.approve_alumni(db, user, user_id)
+def approve(request: Request, user_id: str, user: User = Depends(Admin), db: Session = Depends(get_db)):
+    out = admin.approve_alumni(db, user, user_id)
+    auditing.log(db, request, user, "admin.alumni_approve", "user", user_id)
+    return out
 
 
 @router.post("/alumni/{user_id}/reject")
-def reject(user_id: str, body: RejectIn, _: User = Depends(Admin), db: Session = Depends(get_db)):
-    return admin.reject_alumni(db, user_id, body.reason)
+def reject(
+    request: Request, user_id: str, body: RejectIn, user: User = Depends(Admin), db: Session = Depends(get_db)
+):
+    out = admin.reject_alumni(db, user_id, body.reason)
+    auditing.log(db, request, user, "admin.alumni_reject", "user", user_id)  # the reason text stays out
+    return out
 
 
 @router.get("/users")
@@ -50,9 +56,15 @@ def list_users(
 
 @router.patch("/users/{user_id}/status")
 def change_status(
-    user_id: str, body: UserStatusIn, _: User = Depends(Admin), db: Session = Depends(get_db)
+    request: Request,
+    user_id: str,
+    body: UserStatusIn,
+    user: User = Depends(Admin),
+    db: Session = Depends(get_db),
 ):
-    return admin.change_user_status(db, user_id, body.status)
+    out = admin.change_user_status(db, user_id, body.status)
+    auditing.log(db, request, user, "admin.user_status", "user", user_id, {"status": body.status})
+    return out
 
 
 @router.get("/overview")
