@@ -269,6 +269,12 @@ class ApplyIn(BaseModel):
     consents: list[str] = Field(default_factory=list)
 
 
+class RevokeConsentsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revoke: list[str]
+
+
 class StatusChangeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -166,3 +166,13 @@ def withdraw(db: Session, user: User, app_id: str) -> Application:
     db.commit()
     db.refresh(row)
     return row
+
+
+def revoke_consents(db: Session, user: User, app_id: str, scopes: list[str]) -> Application:
+    row = get_owned(db, user, app_id)
+    if any(s not in consent.SCOPES for s in scopes):
+        raise HTTPException(status_code=422, detail="INVALID_CONSENT")
+    consent.revoke(db, row.id, scopes)
+    db.commit()
+    db.refresh(row)
+    return row

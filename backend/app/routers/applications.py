@@ -5,7 +5,7 @@ from app import applications, consent
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
-from app.schemas import ApplyIn
+from app.schemas import ApplyIn, RevokeConsentsIn
 
 router = APIRouter(prefix="/api/v1", tags=["applications"])
 
@@ -49,4 +49,15 @@ def withdraw_application(
     db: Session = Depends(get_db),
 ):
     row = applications.withdraw(db, user, app_id)
+    return applications.detail_view(db, row)
+
+
+@router.patch("/me/applications/{app_id}/consents")
+def patch_consents(
+    app_id: str,
+    body: RevokeConsentsIn,
+    user: User = Depends(require_role("applicant")),
+    db: Session = Depends(get_db),
+):
+    row = applications.revoke_consents(db, user, app_id, body.revoke)
     return applications.detail_view(db, row)
