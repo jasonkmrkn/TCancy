@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import auth, csrf, profiles, security
+from app import auth, csrf, limits, profiles, security
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import User
@@ -57,17 +57,20 @@ def _register(db: Session, body: AlumniRegisterIn, role: str, status: str, profi
 
 
 @router.post("/register", status_code=201)
-def register(body: RegisterIn, db: Session = Depends(get_db)):
+def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)):
+    limits.register(request)
     return _register(db, body, "applicant", "active", body.profile)
 
 
 @router.post("/register/alumni", status_code=201)
-def register_alumni(body: AlumniRegisterWithProfileIn, db: Session = Depends(get_db)):
+def register_alumni(body: AlumniRegisterWithProfileIn, request: Request, db: Session = Depends(get_db)):
+    limits.register(request)
     return _register(db, body, "alumni", "pending", body.profile)
 
 
 @router.post("/login")
-def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
+def login(body: LoginIn, request: Request, response: Response, db: Session = Depends(get_db)):
+    limits.login(request, body.username)  
     user = db.scalar(select(User).where(User.username == body.username))
     stored_hash = user.password_hash if user is not None else security.DUMMY_HASH
     password_ok = security.verify_password(stored_hash, body.password)

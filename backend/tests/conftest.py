@@ -15,12 +15,17 @@ os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("MASTER_KEY", "dGNhbmN5LXRlc3QtbWFzdGVyLWtleS0wMTIzNDU2Nzg=")
 os.environ.setdefault("BLIND_INDEX_KEY", "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f")
 os.environ["DATABASE_URL"] = _test_url
+os.environ["REDIS_URL"] = ""
+os.environ["TRUSTED_PROXIES"] = ""
+for _name in [n for n in os.environ if n.startswith("RATE_")]:
+    del os.environ[_name]
 _upload_dir = tempfile.mkdtemp(prefix="tcancy_uploads_")
 os.environ["UPLOAD_DIR"] = _upload_dir
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
+from app import ratelimit  # noqa: E402
 from app.db import engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Base  # noqa: E402
@@ -70,6 +75,12 @@ def clean_tables(schema):
         with engine.begin() as conn:
             conn.execute(text("TRUNCATE " + names + " RESTART IDENTITY CASCADE"))
 
+@pytest.fixture(autouse=True)
+def fresh_rate_limits():
+    """Every test starts with empty rate-limit counters."""
+    ratelimit.use_backend(None)
+    yield
+    ratelimit.use_backend(None)
 
 @pytest.fixture
 def client():

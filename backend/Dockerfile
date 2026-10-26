@@ -15,4 +15,4 @@ RUN mkdir -p /app/uploads
 EXPOSE 8000
 
 # Migrasi dijalankan bila alembic.ini sudah ada (dibuat tahap 3), lalu server menyala.
-CMD ["sh", "-c", "if [ -f alembic.ini ]; then alembic upgrade heads; fi && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "if [ -f alembic.ini ]; then alembic upgrade heads; fi && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers"]
