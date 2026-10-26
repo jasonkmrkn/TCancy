@@ -3,7 +3,7 @@ from sqlalchemy import text
 
 from app import cli, security
 from app.db import engine
-from helpers import make_profile
+from helpers import make_alumni_profile, make_profile
 
 AUTH = "/api/v1/auth"
 
@@ -51,7 +51,10 @@ def test_password_is_stored_as_argon2id_hash(client):
 
 
 def test_alumni_registration_also_hashes(client):
-    client.post(AUTH + "/register/alumni", json={"username": "alum", "password": "rahasia123"})
+    client.post(
+        AUTH + "/register/alumni",
+        json={"username": "alum", "password": "rahasia123", "profile": make_alumni_profile()},
+    )
     assert stored_hash("alum").startswith("$argon2id$")
 
 

@@ -4,7 +4,7 @@ from sqlalchemy import text
 
 from app import config
 from app.db import engine
-from helpers import make_profile
+from helpers import make_alumni_profile, make_profile
 
 AUTH = "/api/v1/auth"
 URL = "/api/v1/me/documents"
@@ -165,7 +165,10 @@ def test_delete_removes_row_and_file(client):
 def test_requires_login_and_applicant_role(client):
     assert client.get(URL).status_code == 401
     assert upload(client, "cv", "a.pdf").status_code == 401
-    client.post(AUTH + "/register/alumni", json={"username": "alumna", "password": "rahasia123"})
+    client.post(
+        AUTH + "/register/alumni",
+        json={"username": "alumna", "password": "rahasia123", "profile": make_alumni_profile()},
+    )
     login(client, "alumna")
     assert client.get(URL).status_code == 403  # pending alumni
     assert upload(client, "cv", "a.pdf").status_code == 403
