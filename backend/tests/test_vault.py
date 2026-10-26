@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -221,25 +222,26 @@ def test_nothing_is_logged_or_printed(db, user, policy, caplog, capsys):
 # --- migration ---------------------------------------------------------------
 
 
-def _alembic(url, *args):
-    done = subprocess.run(
-        [sys.executable, "-m", "alembic", *args],
-        cwd=BACKEND, env={**os.environ, "DATABASE_URL": url}, capture_output=True, text=True,
-    )
-    assert done.returncode == 0, done.stderr
-
-
-def test_axel_migration_upgrade_downgrade_upgrade_on_an_empty_database():
+@contextmanager
+def empty_database():
+    """A fresh, empty database next to the test one. Yields (alembic(*args), scalar(sql))."""
     base = engine.url
     name = base.database.removesuffix("_test") + "_axelmig_test"
     url = base.set(database=name).render_as_string(hide_password=False)
     admin = create_engine(base.set(database="postgres"), isolation_level="AUTOCOMMIT")
 
-    def has_table():
+    def alembic(*args):
+        done = subprocess.run(
+            [sys.executable, "-m", "alembic", *args],
+            cwd=BACKEND, env={**os.environ, "DATABASE_URL": url}, capture_output=True, text=True,
+        )
+        assert done.returncode == 0, done.stderr
+
+    def scalar(sql):
         probe = create_engine(url)
         try:
             with probe.connect() as conn:
-                return conn.execute(text("SELECT to_regclass('encrypted_fields')")).scalar() is not None
+                return conn.execute(text(sql)).scalar()
         finally:
             probe.dispose()
 
@@ -247,13 +249,21 @@ def test_axel_migration_upgrade_downgrade_upgrade_on_an_empty_database():
         conn.execute(text('DROP DATABASE IF EXISTS "%s"' % name))
         conn.execute(text('CREATE DATABASE "%s"' % name))
     try:
-        _alembic(url, "upgrade", "axel@head")
-        assert has_table()
-        _alembic(url, "downgrade", "axel_00_branch_root")
-        assert not has_table()
-        _alembic(url, "upgrade", "axel@head")
-        assert has_table()
+        yield alembic, scalar
     finally:
         with admin.connect() as conn:
             conn.execute(text('DROP DATABASE IF EXISTS "%s" WITH (FORCE)' % name))
         admin.dispose()
+
+
+def test_axel_migration_upgrade_downgrade_upgrade_on_an_empty_database():
+    with empty_database() as (alembic, scalar):
+        def has_table():
+            return scalar("SELECT to_regclass('encrypted_fields')") is not None
+
+        alembic("upgrade", "axel@head")
+        assert has_table()
+        alembic("downgrade", "axel_00_branch_root")
+        assert not has_table()
+        alembic("upgrade", "axel@head")
+        assert has_table()

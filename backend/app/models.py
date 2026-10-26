@@ -146,7 +146,6 @@ class Document(Base):
     type: Mapped[str] = mapped_column(Text, nullable=False)
     ext: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

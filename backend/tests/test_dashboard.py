@@ -45,7 +45,7 @@ def test_matches_score_order_and_filters(client):
     sql("UPDATE jobs SET deadline = current_date - 1 WHERE id = :i", i=expired)
 
     as_user(client, "budi", "applicant")  # profile skills are the first two: a and b
-    cv = upload(client, "cv", "cv.pdf", b"%PDF").json()["id"]
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
     r = client.post("%s/jobs/%s/apply" % (URL, applied), json={"cv_document_id": cv})
     assert r.status_code == 201
 
@@ -82,7 +82,7 @@ def test_withdrawn_application_still_excluded(client):
     a = skill_ids(1)[0]
     (job,) = alumni_with_jobs(client, [[a]])
     as_user(client, "budi", "applicant")
-    cv = upload(client, "cv", "cv.pdf", b"%PDF").json()["id"]
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
     app_id = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv}).json()["id"]
     assert len(client.get(URL + "/me/matches").json()["items"]) == 0
     client.delete("%s/me/applications/%s" % (URL, app_id))
@@ -105,8 +105,8 @@ def test_applicant_dashboard_counts(client):
     a = skill_ids(1)[0]
     jobs = alumni_with_jobs(client, [[a]] * 7)
     as_user(client, "budi", "applicant")
-    cv = upload(client, "cv", "cv.pdf", b"%PDF").json()["id"]
-    upload(client, "ktp", "ktp.png", b"png")
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
+    upload(client, "ktp", "ktp.png", b"\x89PNG\r\n\x1a\n")
     app_ids = []
     for job in jobs[:6]:
         r = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv})

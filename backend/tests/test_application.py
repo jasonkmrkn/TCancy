@@ -23,8 +23,8 @@ def make_job(client, **over):
 
 def applicant_with_docs(client, username="budi"):
     as_user(client, username, "applicant")
-    cv = upload(client, "cv", "cv.pdf", b"%PDF cv").json()["id"]
-    video = upload(client, "intro_video", "v.mp4", b"video").json()["id"]
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4 cv").json()["id"]
+    video = upload(client, "intro_video", "v.mp4", b"\x00\x00\x00\x18ftypmp42 video").json()["id"]
     return cv, video
 
 
