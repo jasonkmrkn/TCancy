@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app import applications
+from app import applications, consent
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
-from app.schemas import ApplyIn
+from app.schemas import ApplyIn, RevokeConsentsIn
 
 router = APIRouter(prefix="/api/v1", tags=["applications"])
+
+@router.get("/consent-texts")
+def consent_texts():
+    return consent.texts_view()
 
 
 @router.post("/jobs/{job_id}/apply", status_code=201)
@@ -45,4 +49,15 @@ def withdraw_application(
     db: Session = Depends(get_db),
 ):
     row = applications.withdraw(db, user, app_id)
+    return applications.detail_view(db, row)
+
+
+@router.patch("/me/applications/{app_id}/consents")
+def patch_consents(
+    app_id: str,
+    body: RevokeConsentsIn,
+    user: User = Depends(require_role("applicant")),
+    db: Session = Depends(get_db),
+):
+    row = applications.revoke_consents(db, user, app_id, body.revoke)
     return applications.detail_view(db, row)

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import jobs
+from app import consent, jobs
 from app.models import Application, ApplicationStatusHistory, Document, Job, User
 from app.schemas import ApplyIn
 
@@ -26,6 +26,18 @@ def _owned_document(db: Session, user: User, doc_id: uuid.UUID | None, doc_type:
     return doc
 
 
+REQUIRED_CONSENTS = ("profile", "cv")
+
+def _check_consents(scopes: list[str], has_video: bool) -> None:
+    if any(s not in consent.SCOPES for s in scopes) or len(set(scopes)) != len(scopes):
+        raise HTTPException(status_code=422, detail="INVALID_CONSENT")
+    required = set(REQUIRED_CONSENTS)
+    if has_video:
+        required.add("video")
+    if not required.issubset(scopes):
+        raise HTTPException(status_code=422, detail="CONSENT_REQUIRED")
+
+
 def apply(db: Session, user: User, job_id: str, data: ApplyIn) -> Application:
     job = jobs.get(db, job_id)
     if job.status == "closed":
@@ -33,13 +45,15 @@ def apply(db: Session, user: User, job_id: str, data: ApplyIn) -> Application:
     if job.deadline is not None and job.deadline < date.today():
         raise HTTPException(status_code=409, detail="JOB_EXPIRED")
     exists = db.scalar(
-        select(Application.id).where(Application.job_id == job.id, Application.applicant_id == user.id)
+        select(Application.id).where(
+            Application.job_id == job.id, Application.applicant_id == user.id
+        )
     )
     if exists is not None:
         raise HTTPException(status_code=409, detail="ALREADY_APPLIED")
     cv = _owned_document(db, user, data.cv_document_id, "cv")
     video = _owned_document(db, user, data.intro_video_document_id, "intro_video")
-
+    _check_consents(data.consents, video is not None)
     row = Application(
         job_id=job.id,
         applicant_id=user.id,
@@ -50,9 +64,15 @@ def apply(db: Session, user: User, job_id: str, data: ApplyIn) -> Application:
     db.add(row)
     try:
         db.flush()
-        db.add(ApplicationStatusHistory(
-            application_id=row.id, from_status=None, to_status="submitted", changed_by=user.id,
-        ))
+        db.add(
+            ApplicationStatusHistory(
+                application_id=row.id,
+                from_status=None,
+                to_status="submitted",
+                changed_by=user.id,
+            )
+        )
+        consent.grant(db, row.id, data.consents)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -108,6 +128,12 @@ def detail_view(db: Session, row: Application) -> dict:
             str(row.intro_video_document_id) if row.intro_video_document_id else None
         ),
         "created_at": row.created_at.isoformat(),
+        "consents": consent.views_of(db, row.id),
+        "identity_access_expires_at": (
+            row.identity_access_expires_at.isoformat()
+            if row.identity_access_expires_at
+            else None
+        ),        
         "history": history_of(db, row.id),
     }
 
@@ -143,6 +169,16 @@ def withdraw(db: Session, user: User, app_id: str) -> Application:
     ))
     row.status = "withdrawn"
     row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def revoke_consents(db: Session, user: User, app_id: str, scopes: list[str]) -> Application:
+    row = get_owned(db, user, app_id)
+    if any(s not in consent.SCOPES for s in scopes):
+        raise HTTPException(status_code=422, detail="INVALID_CONSENT")
+    consent.revoke(db, row.id, scopes)
     db.commit()
     db.refresh(row)
     return row

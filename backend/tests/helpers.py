@@ -60,3 +60,7 @@ def login_as(client, username, password="rahasia123"):
     r = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     return {"X-CSRF-Token": client.cookies["csrf_token"]}
+
+
+CONSENTS = ["profile", "cv"]
+CONSENTS_WITH_VIDEO = ["profile", "cv", "video"]

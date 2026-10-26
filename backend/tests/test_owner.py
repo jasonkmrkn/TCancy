@@ -2,6 +2,7 @@ import itertools
 
 from test_document import upload
 from test_job import as_user, job_body, login, make_user
+from helpers import CONSENTS, CONSENTS_WITH_VIDEO
 
 URL = "/api/v1"
 _names = itertools.count(1)
@@ -24,9 +25,10 @@ def apply_as(client, job_id, username, with_video=True):
     """Register an applicant, upload documents, apply. Returns the application id."""
     as_user(client, username, "applicant")
     cv = upload(client, "cv", "cv.pdf", CV_BYTES).json()["id"]
-    body = {"cv_document_id": cv, "cover_note": "Hello"}
+    body = {"cv_document_id": cv, "cover_note": "Hello", "consents": list(CONSENTS)}
     if with_video:
         body["intro_video_document_id"] = upload(client, "intro_video", "v.mp4", VIDEO_BYTES).json()["id"]
+        body["consents"] = list(CONSENTS_WITH_VIDEO)
     r = client.post("%s/jobs/%s/apply" % (URL, job_id), json=body)
     assert r.status_code == 201
     return r.json()["id"]

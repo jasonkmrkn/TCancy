@@ -266,6 +266,13 @@ class ApplyIn(BaseModel):
     cv_document_id: uuid.UUID
     intro_video_document_id: uuid.UUID | None = None
     cover_note: str | None = Field(default=None, max_length=2000)
+    consents: list[str] = Field(default_factory=list)
+
+
+class RevokeConsentsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revoke: list[str]
 
 
 class StatusChangeIn(BaseModel):
