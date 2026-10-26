@@ -25,7 +25,7 @@ def list_applications(
 
 @router.get("/applications/{app_id}")
 def get_application(app_id: str, user: User = Depends(Owner), db: Session = Depends(get_db)):
-    return owner.detail_view(db, owner.get_application(db, user, app_id))
+    return owner.detail_view(db, owner.get_application(db, user, app_id), user)
 
 
 @router.patch("/applications/{app_id}/status")
@@ -36,17 +36,17 @@ def change_status(
     db: Session = Depends(get_db),
 ):
     row = owner.change_status(db, user, app_id, body.status, body.note)
-    return owner.detail_view(db, row)
+    return owner.detail_view(db, row, user)
 
 
 @router.get("/applications/{app_id}/cv")
 def download_cv(app_id: str, user: User = Depends(Owner), db: Session = Depends(get_db)):
-    return owner.cv_file(db, owner.get_application(db, user, app_id))
+    return owner.cv_file(db, owner.get_application(db, user, app_id), user)
 
 
 @router.get("/applications/{app_id}/video")
 def download_video(app_id: str, user: User = Depends(Owner), db: Session = Depends(get_db)):
-    return owner.video_file(db, owner.get_application(db, user, app_id))
+    return owner.video_file(db, owner.get_application(db, user, app_id), user)
 
 
 @router.get("/applications/{app_id}/identity")

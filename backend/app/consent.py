@@ -97,3 +97,20 @@ def views_of(db: Session, application_id: uuid.UUID) -> list[dict]:
         }
         for r in rows
     ]
+
+
+def active_scopes(db: Session, application_ids) -> dict[uuid.UUID, set[str]]:
+    """Scopes with an active consent (granted, not revoked) for each application id."""
+    out = {i: set() for i in application_ids}
+    if not out:
+        return out
+    rows = db.execute(
+        select(ApplicationConsent.application_id, ApplicationConsent.scope).where(
+            ApplicationConsent.application_id.in_(list(out)),
+            ApplicationConsent.granted_at.is_not(None),
+            ApplicationConsent.revoked_at.is_(None),
+        )
+    )
+    for application_id, scope in rows:
+        out[application_id].add(scope)
+    return out
