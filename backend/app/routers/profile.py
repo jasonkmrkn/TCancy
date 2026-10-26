@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import profiles
+from app import auditing, profiles
 from app.db import get_db
 from app.deps import require_role
 from app.models import Skill, User
@@ -43,6 +43,7 @@ def get_profile(
 
 @router.put("/me/profile")
 def put_profile(
+    request: Request,
     body: dict = Body(...),
     user: User = Depends(require_role("applicant", "alumni", allow_pending=True)),
     db: Session = Depends(get_db),
@@ -65,4 +66,7 @@ def put_profile(
     except Exception:
         db.rollback()
         raise
+    # Only the names of the fields that were sent, never their values.
+    auditing.log(db, request, user, "profile.update", "user", user.id,
+                 {"fields": sorted(data.model_dump(exclude_unset=True))})
     return out

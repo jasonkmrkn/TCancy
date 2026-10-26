@@ -1,9 +1,9 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
-from app import testimonials
+from app import auditing, testimonials
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
@@ -25,8 +25,12 @@ def list_public(
 
 
 @router.post("/testimonials", status_code=201)
-def create(body: TestimonialIn, user: User = Depends(Applicant), db: Session = Depends(get_db)):
-    return testimonials.create(db, user, body)
+def create(
+    request: Request, body: TestimonialIn, user: User = Depends(Applicant), db: Session = Depends(get_db)
+):
+    out = testimonials.create(db, user, body)
+    auditing.log(db, request, user, "testimonial.create", "testimonial", out["id"])
+    return out
 
 
 @router.get("/me/testimonials")
@@ -35,8 +39,11 @@ def list_mine(user: User = Depends(Applicant), db: Session = Depends(get_db)):
 
 
 @router.delete("/testimonials/{testimonial_id}", status_code=204)
-def delete(testimonial_id: str, user: User = Depends(Applicant), db: Session = Depends(get_db)):
+def delete(
+    request: Request, testimonial_id: str, user: User = Depends(Applicant), db: Session = Depends(get_db)
+):
     testimonials.delete(db, user, testimonial_id)
+    auditing.log(db, request, user, "testimonial.delete", "testimonial", testimonial_id)
     return Response(status_code=204)
 
 
@@ -53,9 +60,13 @@ def list_admin(
 
 @router.patch("/admin/testimonials/{testimonial_id}")
 def moderate(
+    request: Request,
     testimonial_id: str,
     body: TestimonialStatusIn,
     admin: User = Depends(Admin),
     db: Session = Depends(get_db),
 ):
-    return testimonials.moderate(db, admin, testimonial_id, body.status)
+    out = testimonials.moderate(db, admin, testimonial_id, body.status)
+    auditing.log(db, request, admin, "admin.testimonial_moderate", "testimonial", testimonial_id,
+                 {"status": body.status})
+    return out
