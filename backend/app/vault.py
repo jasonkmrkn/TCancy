@@ -95,7 +95,7 @@ def load_fields(db: Session, user_ids: list[uuid.UUID], field: str) -> dict:
     return {row.user_id: _decrypt(row) for row in rows}
 
 
-# Integrity for documents, which may not import app.integrity itself.
+# Integrity for documents and benchmarks, which may not import app.integrity themselves.
 
 def integrity_enabled() -> bool:
     return integrity.enabled()
@@ -105,7 +105,9 @@ def tag_file_chunk(alg: str, item: str, salt: bytes, nonce: bytes | None, index:
     return integrity.tag(alg, item, salt, nonce, index, last, ciphertext)
 
 
-def verify_file(chunks, tags: list[bytes], alg: str, item: str, salt: bytes, nonce: bytes | None, what: str) -> None:
-    ok, _ = integrity.verify(chunks, tags, alg, item, salt, nonce)
+def verify_file(chunks, tags: list[bytes], alg: str, item: str, salt: bytes, nonce: bytes | None, what: str) -> float:
+    """Check a whole copy; returns the time spent on HMAC work in ms (for benchmarks)."""
+    ok, ms = integrity.verify(chunks, tags, alg, item, salt, nonce)
     if not ok:
         integrity.fail(what)
+    return ms
