@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app import applications, documents, jobs, storage
+from app import applications, documents, jobs, storage, vault
 from app.models import (
     Application,
     ApplicantProfile,
@@ -77,13 +77,16 @@ def _applicant_views(db: Session, rows: list[Application]) -> dict[uuid.UUID, di
         .order_by(Skill.name)
     ):
         skills[uid].append({"id": str(sid), "name": name})
+    names = vault.load_fields(db, ids, "full_name")
+    emails = vault.load_fields(db, ids, "email")
+    phones = vault.load_fields(db, ids, "phone")
     for p in db.scalars(select(ApplicantProfile).where(ApplicantProfile.user_id.in_(ids))):
         out[p.user_id] = {
-            "full_name": p.full_name,
-            "email": p.email,
+            "full_name": names.get(p.user_id),
+            "email": emails.get(p.user_id),
             "angkatan": p.angkatan,
             "skills": skills[p.user_id],
-            "phone": p.phone,
+            "phone": phones.get(p.user_id),
         }
     return out
 
@@ -192,12 +195,11 @@ def _ktp(db: Session, row: Application) -> Document | None:
 
 
 def identity_view(db: Session, row: Application) -> dict:
-    p = db.get(ApplicantProfile, row.applicant_id)
     ktp = _ktp(db, row)
     return {
-        "nik": p.nik,
-        "address": p.address,
-        "birth_date": p.birth_date.isoformat(),
+        "nik": vault.load_field(db, row.applicant_id, "nik"),
+        "address": vault.load_field(db, row.applicant_id, "address"),
+        "birth_date": vault.load_field(db, row.applicant_id, "birth_date"),
         "ktp_available": ktp is not None and storage.exists(ktp.storage_key),
     }
 
