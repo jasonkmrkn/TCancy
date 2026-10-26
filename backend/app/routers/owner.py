@@ -51,9 +51,9 @@ def download_video(app_id: str, user: User = Depends(Owner), db: Session = Depen
 
 @router.get("/applications/{app_id}/identity")
 def identity(app_id: str, user: User = Depends(Owner), db: Session = Depends(get_db)):
-    return owner.identity_view(db, owner.get_application(db, user, app_id))
+    return owner.identity_view(db, owner.get_application(db, user, app_id), user)
 
 
 @router.get("/applications/{app_id}/identity/ktp")
 def identity_ktp(app_id: str, user: User = Depends(Owner), db: Session = Depends(get_db)):
-    return owner.ktp_file(db, owner.get_application(db, user, app_id))
+    return owner.ktp_file(db, owner.get_application(db, user, app_id), user)

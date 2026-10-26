@@ -1,12 +1,12 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app import applications, consent, documents, jobs, policy, vault
+from app import applications, config, consent, documents, jobs, policy, vault
 from app.models import (
     Application,
     ApplicantProfile,
@@ -68,6 +68,19 @@ def _visibility(db: Session, rows: list[Application], caller: User) -> dict[uuid
     """What the caller may see of each application, by application id."""
     scopes = consent.active_scopes(db, [r.id for r in rows])
     return {r.id: policy.decide(r.status, scopes[r.id], caller.role) for r in rows}
+
+
+def _identity_access(db: Session, row: Application, user: User) -> tuple[str, datetime | None]:
+    """Identity state for the caller, and the expiry date to show with it."""
+    scopes = consent.active_scopes(db, [row.id])[row.id]
+    state = policy.identity_state(
+        row.status,
+        scopes,
+        row.identity_access_expires_at,
+        datetime.now(timezone.utc),
+        user.role,
+    )
+    return state, policy.shown_expiry(state, row.identity_access_expires_at)
 
 
 def _applicant_views(
@@ -174,7 +187,11 @@ def detail_view(db: Session, row: Application, user: User) -> dict:
     )
     out["job"] = jobs.summaries(db, [db.get(Job, row.job_id)])[0]
     out["cover_note"] = row.cover_note
-    out["identity"] = {"state": "available", "expires_at": None}
+    state, expires_at = _identity_access(db, row, user)
+    out["identity"] = {
+        "state": state,
+        "expires_at": expires_at.isoformat() if expires_at else None,
+    }
     out["history"] = applications.history_of(db, row.id)
     return out
 
@@ -183,6 +200,7 @@ def change_status(db: Session, user: User, app_id: str, status: str, note: str |
     row = get_application(db, user, app_id)
     if status not in TRANSITIONS.get(row.status, set()):
         raise HTTPException(status_code=409, detail="INVALID_TRANSITION")
+    now = datetime.now(timezone.utc)
     db.add(ApplicationStatusHistory(
         application_id=row.id,
         from_status=row.status,
@@ -191,7 +209,11 @@ def change_status(db: Session, user: User, app_id: str, status: str, note: str |
         note=note or None,
     ))
     row.status = status
-    row.updated_at = datetime.now(timezone.utc)
+    row.updated_at = now
+    if status == "accepted" and row.accepted_at is None:
+        # The identity window starts at the first acceptance and is never extended.
+        row.accepted_at = now
+        row.identity_access_expires_at = now + timedelta(days=config.IDENTITY_ACCESS_DAYS)
     db.commit()
     db.refresh(row)
     return row
@@ -234,7 +256,17 @@ def _ktp_id(db: Session, row: Application) -> str | None:
     return cards[-1]["id"] if cards else None
 
 
-def identity_view(db: Session, row: Application) -> dict:
+def _require_identity(db: Session, row: Application, user: User) -> None:
+    """The identity endpoints open only while the policy says available, like the detail block."""
+    state, _ = _identity_access(db, row, user)
+    if state == policy.IDENTITY_EXPIRED:
+        raise HTTPException(status_code=403, detail="IDENTITY_EXPIRED")
+    if state != policy.IDENTITY_AVAILABLE:
+        raise HTTPException(status_code=403, detail="IDENTITY_LOCKED")
+
+
+def identity_view(db: Session, row: Application, user: User) -> dict:
+    _require_identity(db, row, user)
     return {
         "nik": vault.load_field(db, row.applicant_id, "nik"),
         "address": vault.load_field(db, row.applicant_id, "address"),
@@ -243,7 +275,8 @@ def identity_view(db: Session, row: Application) -> dict:
     }
 
 
-def ktp_file(db: Session, row: Application) -> StreamingResponse:
+def ktp_file(db: Session, row: Application, user: User) -> StreamingResponse:
+    _require_identity(db, row, user)
     ktp_id = _ktp_id(db, row)
     if ktp_id is None:
         raise HTTPException(status_code=404, detail="NO_KTP")
