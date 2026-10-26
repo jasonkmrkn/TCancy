@@ -257,7 +257,8 @@ def stream(db: Session, document_id, *, algorithm="aes"):
     database session is closed.
     """
     doc = get_meta(db, document_id)
-    if doc is None:
+    # Under production only aes is served, even for documents that still keep older des/rc4 copies.
+    if doc is None or algorithm not in _algorithms():
         raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
     copy = db.scalar(select(DocumentCopy).where(
         DocumentCopy.document_id == doc.id, DocumentCopy.algorithm == algorithm,
