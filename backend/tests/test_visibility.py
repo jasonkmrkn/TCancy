@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app import consent
 from app.db import engine
 from test_job import as_user, login
+from test_owner import CV_BYTES, VIDEO_BYTES
 from test_owner import apply_as, new_owner, setup
 
 URL = "/api/v1"
@@ -67,8 +68,8 @@ def test_visibility_table(client, status, revoked):
         assert (view["documents"]["video"] is None) is ("video" in gone)
 
     for path, scope, content in (
-        ("cv", "cv", b"%PDF cv bytes"),
-        ("video", "video", b"video bytes"),
+        ("cv", "cv", CV_BYTES),
+        ("video", "video", VIDEO_BYTES),
     ):
         r = client.get("%s/applications/%s/%s" % (URL, app_id, path))
         if scope in gone:
