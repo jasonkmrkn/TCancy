@@ -1,45 +1,75 @@
 # TCancy
 
-Portal lowongan kerja dan magang alumni HMTC ITS. Project tugas Information Security (kelompok 17):
-semua data pribadi dan dokumen disimpan dalam bentuk terenkripsi (AES, DES, RC4; mode non-ECB).
+Portal lowongan kerja dan magang untuk alumni HMTC ITS. Project ini dikerjakan untuk tugas Information
+Security (kelompok 17), dengan fokus pada perlindungan data pribadi: seluruh data sensitif dan dokumen
+disimpan dalam bentuk terenkripsi (AES, DES, RC4; mode non-ECB).
 
-- Backend: FastAPI, SQLAlchemy 2, Alembic, PostgreSQL 16
-- Frontend: Next.js 15, React 19, Tailwind 3.4
+## Tech Stack
 
-## Cara menjalankan
+| Layer | Teknologi |
+|---|---|
+| Backend | FastAPI, SQLAlchemy 2, Alembic |
+| Database | PostgreSQL 16 |
+| Frontend | Next.js 15, React 19, Tailwind CSS 3.4 |
 
-**Database (Docker, hanya PostgreSQL):** service `postgres` di `backend/docker-compose.yml`, port host 5433.
-Buat dua database: satu untuk aplikasi dan satu untuk test. Nama database test **harus berakhiran `_test`**.
+## Prerequisites
 
-**Backend** (dari folder `backend`, dengan virtual environment Python 3.11):
+- Python 3.11
+- Node.js dan npm
+- Docker (untuk PostgreSQL)
+
+## Getting Started
+
+### 1. Database
+
+Jalankan service `postgres` dari `backend/docker-compose.yml` (port host `5433`), lalu buat dua database:
+satu untuk aplikasi dan satu untuk testing.
+
+**Notes:**
+
+- Nama database testing harus berakhiran `_test`.
+
+### 2. Environment Variables
+
+Salin `backend/.env.example` menjadi `backend/.env`, lalu isi variable berikut:
+
+| Variable | Deskripsi | Cara generate |
+|---|---|---|
+| `SESSION_SECRET` | Secret untuk session (minimal 32 byte) | `openssl rand -base64 32` |
+| `MASTER_KEY` | Master key enkripsi (base64 dari 32 byte) | `openssl rand -base64 32` |
+| `BLIND_INDEX_KEY` | Key untuk blind index (email, NIK) | `openssl rand -hex 32` |
+
+**Notes:**
+
+- Setiap environment memakai secret masing-masing. Data terenkripsi dengan `MASTER_KEY` tertentu tidak
+  dapat didekripsi dengan key lain, sehingga `MASTER_KEY` yang hilang berarti data tidak dapat dipulihkan.
+- Untuk pengembangan lokal via HTTP, set `COOKIE_SECURE=false`.
+- Saat ini `docker-compose.yml` dan `.env.example` belum meneruskan `SESSION_SECRET`, sehingga container
+  API gagal start sampai variable tersebut diisi.
+
+### 3. Backend
 
 ```bash
+cd backend
 pip install -r requirements.txt
-alembic upgrade heads        # bukan "head": ada beberapa head migration
+alembic upgrade heads
 uvicorn app.main:app --port 8010
 ```
 
-**Frontend** (dari folder `frontend`): `npm install`, lalu `npm run dev` (port 3000). Request ke `/api/v1/*`
-di-forward ke `http://localhost:8010`.
+**Notes:**
 
-## Environment variable
+- Gunakan `alembic upgrade heads`, bukan `head`, karena terdapat beberapa head migration.
 
-Salin `backend/.env.example` ke `.env` (jangan di-commit). Secret berikut **wajib** diisi dan berbeda di tiap
-mesin, jangan dikirim lewat chat:
+### 4. Frontend
 
-| Variable | Cara membuat |
-|---|---|
-| `SESSION_SECRET` (minimal 32 byte) | `openssl rand -base64 32` |
-| `MASTER_KEY` (base64 dari 32 byte) | `openssl rand -base64 32` |
-| `BLIND_INDEX_KEY` | `openssl rand -hex 32` |
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-Catatan:
-
-- Kalau `MASTER_KEY` hilang, data terenkripsi tidak bisa dibuka lagi. Data dari satu mesin juga tidak bisa
-  dibuka di mesin lain yang memakai key berbeda.
-- Untuk HTTP lokal, set `COOKIE_SECURE=false`.
-- Saat ini `docker-compose.yml` dan `.env.example` belum meneruskan `SESSION_SECRET`, sehingga container API
-  gagal start sampai variable itu diisi.
+Frontend berjalan di `http://localhost:3000`, dan request ke `/api/v1/*` diteruskan ke
+`http://localhost:8010`.
 
 ## Testing
 
@@ -48,14 +78,15 @@ export TEST_DATABASE_URL="postgresql+psycopg://<user>:<password>@localhost:5433/
 python -m pytest
 ```
 
-Test membuat schema dengan `create_all` (bukan Alembic), jadi migration tidak ikut teruji oleh `pytest`.
-Uji migration secara terpisah pada database kosong: `alembic upgrade heads`, `alembic downgrade base`,
-lalu `alembic upgrade heads` lagi.
+**Notes:**
 
-Contract test di `backend/tests/contract/` harus tetap hijau, baik saat memakai stub maupun saat stub sudah
-diganti implementasi asli.
+- Test membuat schema dengan `create_all` (bukan Alembic), sehingga migration tidak ikut teruji oleh
+  `pytest`. Uji migration secara terpisah pada database kosong: `alembic upgrade heads`,
+  `alembic downgrade base`, kemudian `alembic upgrade heads` kembali.
+- Contract test di `backend/tests/contract/` harus tetap lulus, baik saat memakai stub maupun setelah
+  stub diganti dengan implementasi asli.
 
-## Jobdesk
+## Team
 
 | Anggota | Fokus | Cakupan |
 |---|---|---|
