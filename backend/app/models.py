@@ -76,13 +76,7 @@ class ApplicantProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    full_name: Mapped[str] = mapped_column(Text, nullable=False)
-    email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    phone: Mapped[str] = mapped_column(Text, nullable=False)
-    nik: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     nik_blind_index: Mapped[bytes | None] = mapped_column(LargeBinary, unique=True)
-    address: Mapped[str] = mapped_column(Text, nullable=False)
-    birth_date: Mapped[date] = mapped_column(Date, nullable=False)
     angkatan: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     preferred_type: Mapped[str | None] = mapped_column(Text)
     preferred_location: Mapped[str | None] = mapped_column(Text)
@@ -100,7 +94,6 @@ class AlumniProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    full_name: Mapped[str | None] = mapped_column(Text)
     company: Mapped[str | None] = mapped_column(Text)
     angkatan: Mapped[int | None] = mapped_column(SmallInteger)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

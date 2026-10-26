@@ -6,7 +6,7 @@ from app import config
 from app.db import SessionLocal, engine
 from app.main import app
 from app.models import RefreshToken
-from helpers import login_as, make_profile
+from helpers import login_as, make_alumni_profile, make_profile
 
 AUTH = "/api/v1/auth"
 PASSWORD = "rahasia123"
@@ -187,7 +187,10 @@ def test_register_and_login_need_no_header_even_with_old_cookies_around(client):
         json={"username": "siti", "password": PASSWORD, "profile": make_profile()},
     )
     assert r.status_code == 201
-    r = client.post(AUTH + "/register/alumni", json={"username": "alum", "password": PASSWORD})
+    r = client.post(
+        AUTH + "/register/alumni",
+        json={"username": "alum", "password": PASSWORD, "profile": make_alumni_profile()},
+    )
     assert r.status_code == 201
     r = client.post(AUTH + "/login", json={"username": "siti", "password": PASSWORD})
     assert r.status_code == 200

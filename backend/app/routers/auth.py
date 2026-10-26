@@ -8,7 +8,7 @@ from app import auth, csrf, profiles, security
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import User
-from app.schemas import AlumniRegisterIn, LoginIn, RegisterIn
+from app.schemas import AlumniRegisterIn, AlumniRegisterWithProfileIn, LoginIn, RegisterIn
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -24,7 +24,8 @@ def _refresh_failed(status_code: int, detail: str) -> JSONResponse:
 def _register(db: Session, body: AlumniRegisterIn, role: str, status: str, profile=None) -> dict:
     if db.scalar(select(User.id).where(User.username == body.username)) is not None:
         raise HTTPException(status_code=409, detail="USERNAME_TAKEN")
-    if profile is not None:
+    if role == "applicant":
+        # Early rejection, before the costly password hash.
         profiles.check_skills(db, profile.skill_ids)
         profiles.check_unique(db, profile)
     user = User(
@@ -37,14 +38,20 @@ def _register(db: Session, body: AlumniRegisterIn, role: str, status: str, profi
     db.add(user)
     try:
         db.flush()
-        if profile is not None:
-            profiles.create_applicant_profile(db, user.id, profile)
+        if role == "applicant":
+            profiles.create_applicant(db, user, profile)
         else:
-            profiles.get_alumni_profile(db, user.id)
+            profiles.create_alumni(db, user, profile)
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="USERNAME_TAKEN")
+        code = profiles.conflict_code(exc)
+        if code is None:
+            raise
+        raise HTTPException(status_code=409, detail=code) from None
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(user)
     return user_out(user)
 
@@ -55,8 +62,8 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
 
 @router.post("/register/alumni", status_code=201)
-def register_alumni(body: AlumniRegisterIn, db: Session = Depends(get_db)):
-    return _register(db, body, "alumni", "pending")
+def register_alumni(body: AlumniRegisterWithProfileIn, db: Session = Depends(get_db)):
+    return _register(db, body, "alumni", "pending", body.profile)
 
 
 @router.post("/login")

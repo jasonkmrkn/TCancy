@@ -5,9 +5,9 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app import jobs
+from app import jobs, vault
 from app.models import ROLES, STATUSES, AlumniProfile, Application, Document, Job, User
-from app.profiles import alumni_profile_complete, alumni_verification, get_alumni_profile
+from app.profiles import alumni_profile_complete, alumni_verification, display_name, get_alumni_profile
 
 APPLICATION_STATUSES = ("submitted", "shortlisted", "accepted", "rejected", "withdrawn")
 JOB_STATUSES = ("open", "closed")
@@ -56,20 +56,22 @@ def list_alumni(db: Session, state: str | None, limit: int, cursor: str | None) 
         query.order_by(User.created_at.desc(), User.id.desc()).limit(limit + 1)
     ).all()
     page = rows[:limit]
+    names = vault.load_fields(db, [user.id for user, _ in page], "full_name")
     items = []
     for user, profile in page:
         if profile is None:
             profile = AlumniProfile(user_id=user.id)
+        full_name = names.get(user.id) or None
         items.append(
             {
                 "id": str(user.id),
                 "username": user.username,
                 "account_status": user.status,
                 "verification": alumni_verification(user, profile),
-                "full_name": profile.full_name,
+                "full_name": full_name,
                 "company": profile.company,
                 "angkatan": profile.angkatan,
-                "profile_complete": alumni_profile_complete(profile),
+                "profile_complete": alumni_profile_complete(profile, full_name),
                 "created_at": user.created_at.isoformat(),
             }
         )
@@ -88,7 +90,7 @@ def approve_alumni(db: Session, admin: User, user_id: str) -> dict:
         raise HTTPException(status_code=409, detail="ACCOUNT_SUSPENDED")
     if alumni_verification(user, profile)["state"] == "approved":
         raise HTTPException(status_code=409, detail="ALREADY_APPROVED")
-    if not alumni_profile_complete(profile):
+    if not alumni_profile_complete(profile, display_name(db, user.id)):
         raise HTTPException(status_code=409, detail="PROFILE_INCOMPLETE")
     user.status = "active"
     profile.verified_at = datetime.now(timezone.utc)

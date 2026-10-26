@@ -36,11 +36,9 @@ def get_profile(
     user: User = Depends(require_role("applicant", "alumni", allow_pending=True)),
     db: Session = Depends(get_db),
 ):
-    if user.role == "alumni":
-        out = profiles.alumni_profile_out(db, user)
-        db.commit()
-        return out
-    return profiles.applicant_profile_out(db, user)
+    out = profiles.read(db, user)
+    db.commit()  # reading an alumni profile may create its row
+    return out
 
 
 @router.put("/me/profile")
@@ -51,19 +49,20 @@ def put_profile(
 ):
     if user.role == "alumni":
         data = _parse(AlumniProfileIn, body)
-        profiles.replace_alumni_profile(db, user, data)
-        db.commit()
-        return profiles.alumni_profile_out(db, user)
-
-    if user.status != "active":
-        raise HTTPException(status_code=403, detail="ACCOUNT_PENDING")
-    data = _parse(ApplicantProfileIn, body)
-    profiles.check_skills(db, data.skill_ids)
-    profiles.check_unique(db, data, user.id)
-    profiles.replace_applicant_profile(db, user, data)
+    else:
+        if user.status != "active":
+            raise HTTPException(status_code=403, detail="ACCOUNT_PENDING")
+        data = _parse(ApplicantProfileIn, body)
     try:
+        out = profiles.update(db, user, data)
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="EMAIL_TAKEN")
-    return profiles.applicant_profile_out(db, user)
+        code = profiles.conflict_code(exc)
+        if code is None:
+            raise
+        raise HTTPException(status_code=409, detail=code) from None
+    except Exception:
+        db.rollback()
+        raise
+    return out
