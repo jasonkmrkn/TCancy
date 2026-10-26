@@ -312,12 +312,15 @@ def test_deleted_video_is_404_only_after_the_consent_check(client):
     assert r.status_code == 403 and r.json()["detail"] == "NOT_VISIBLE"
 
 
-def test_file_missing_on_disk_is_404(client):
+def test_file_missing_on_disk_is_500_storage_error(client):
     _, _, app_id = setup(client)
     with engine.connect() as conn:
-        keys = [r[0] for r in conn.execute(text("SELECT storage_key FROM documents WHERE type = 'cv'"))]
+        keys = [r[0] for r in conn.execute(text(
+            "SELECT c.storage_key FROM document_copies c "
+            "JOIN documents d ON d.id = c.document_id WHERE d.type = 'cv'"
+        ))]
     assert keys
     for key in keys:
         storage.delete(key)
     r = client.get("%s/applications/%s/cv" % (URL, app_id))
-    assert r.status_code == 404 and r.json()["detail"] == "DOCUMENT_NOT_FOUND"
+    assert r.status_code == 500 and r.json()["detail"] == "STORAGE_ERROR"

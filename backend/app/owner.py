@@ -1,4 +1,3 @@
-import itertools
 import uuid
 from datetime import datetime, timezone
 
@@ -7,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app import applications, consent, documents, jobs, policy, storage, vault
+from app import applications, consent, documents, jobs, policy, vault
 from app.models import (
     Application,
     ApplicantProfile,
@@ -202,15 +201,10 @@ def _file_response(db: Session, document_id, filename: str) -> StreamingResponse
     meta = documents.get_meta(db, document_id) if document_id else None
     if meta is None:
         raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
-    try:
-        chunks = iter(documents.stream(db, meta.id))
-        # Read the first chunk now, so a failure becomes a proper error response
-        # instead of a broken download.
-        first = next(chunks, b"")
-    except storage.StorageError:
-        raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
+    # documents.stream reads the first chunk itself, so a missing or unreadable file
+    # raises its own HTTP error (404 or 500 STORAGE_ERROR) before the response starts.
     return StreamingResponse(
-        itertools.chain([first], chunks),
+        documents.stream(db, meta.id),
         media_type=documents.MEDIA_TYPES.get(meta.ext, "application/octet-stream"),
         headers={
             "Content-Disposition": 'attachment; filename="%s.%s"' % (filename, meta.ext)
