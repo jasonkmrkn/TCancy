@@ -51,7 +51,7 @@ def test_list_applicants_full_data(client):
     item = body["items"][0]
     assert item["id"] == app_id and item["status"] == "submitted"
     a = item["applicant"]
-    assert a["full_name"] == "Budi Santoso" and a["phone"] == "+628123456789"
+    assert a["full_name"] == "Budi Santoso" and "phone" not in a  # not shortlisted yet
     assert a["email"].endswith("@example.com") and a["angkatan"] == 2019
     assert len(a["skills"]) == 2 and set(a["skills"][0]) == {"id", "name"}
     assert item["documents"]["cv"]["ext"] == "pdf"
@@ -125,7 +125,7 @@ def test_detail(client):
     d = r.json()
     assert d["job"]["id"] == job_id and d["cover_note"] == "Hello"
     assert d["identity"] == {"state": "available", "expires_at": None}
-    assert d["applicant"]["phone"] and d["documents"]["cv"]["id"]
+    assert "phone" not in d["applicant"] and d["documents"]["cv"]["id"]
     assert [h["to_status"] for h in d["history"]] == ["submitted"]
 
 
@@ -233,3 +233,27 @@ def test_deleted_document_clears_reference(client):
     login(client, owner)
     item = client.get("%s/jobs/%s/applications" % (URL, job_id)).json()["items"][0]
     assert item["documents"]["video"] is None and item["documents"]["cv"] is not None
+
+
+def test_phone_appears_from_shortlisted(client):
+    _, job_id, app_id = setup(client)
+    list_url = "%s/jobs/%s/applications" % (URL, job_id)
+    assert "phone" not in client.get(list_url).json()["items"][0]["applicant"]
+    r = client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "shortlisted"})
+    assert r.status_code == 200 and r.json()["applicant"]["phone"] == "+628123456789"
+    assert client.get(list_url).json()["items"][0]["applicant"]["phone"] == "+628123456789"
+
+
+def test_applicant_is_null_when_profile_consent_is_revoked(client):
+    owner, job_id, app_id = setup(client)
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    r = client.patch(
+        "%s/me/applications/%s/consents" % (URL, app_id), json={"revoke": ["profile"]}
+    )
+    assert r.status_code == 200
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+    item = client.get("%s/jobs/%s/applications" % (URL, job_id)).json()["items"][0]
+    assert item["applicant"] is None and item["documents"]["cv"] is not None
+    assert client.get("%s/applications/%s" % (URL, app_id)).json()["applicant"] is None

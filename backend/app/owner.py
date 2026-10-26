@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app import applications, documents, jobs, vault
+from app import applications, consent, documents, jobs, policy, storage, vault
 from app.models import (
     Application,
     ApplicantProfile,
@@ -64,11 +64,24 @@ def _document_view(doc: Document | None) -> dict | None:
     }
 
 
-def _applicant_views(db: Session, rows: list[Application]) -> dict[uuid.UUID, dict]:
-    ids = list({r.applicant_id for r in rows})
-    out: dict[uuid.UUID, dict] = {}
-    if not ids:
+def _visibility(db: Session, rows: list[Application], caller: User) -> dict[uuid.UUID, policy.Visibility]:
+    """What the caller may see of each application, by application id."""
+    scopes = consent.active_scopes(db, [r.id for r in rows])
+    return {r.id: policy.decide(r.status, scopes[r.id], caller.role) for r in rows}
+
+
+def _applicant_views(
+    db: Session, rows: list[Application], seen: dict[uuid.UUID, policy.Visibility]
+) -> dict[uuid.UUID, dict | None]:
+    """Applicant objects by application id; None when the profile is not visible.
+
+    The phone key is left out entirely unless the policy allows it.
+    """
+    out: dict[uuid.UUID, dict | None] = {r.id: None for r in rows}
+    shown = [r for r in rows if seen[r.id].profile]
+    if not shown:
         return out
+    ids = list({r.applicant_id for r in shown})
     skills: dict[uuid.UUID, list[dict]] = {i: [] for i in ids}
     for uid, sid, name in db.execute(
         select(ApplicantSkill.user_id, Skill.id, Skill.name)
@@ -79,15 +92,25 @@ def _applicant_views(db: Session, rows: list[Application]) -> dict[uuid.UUID, di
         skills[uid].append({"id": str(sid), "name": name})
     names = vault.load_fields(db, ids, "full_name")
     emails = vault.load_fields(db, ids, "email")
-    phones = vault.load_fields(db, ids, "phone")
-    for p in db.scalars(select(ApplicantProfile).where(ApplicantProfile.user_id.in_(ids))):
-        out[p.user_id] = {
-            "full_name": names.get(p.user_id),
-            "email": emails.get(p.user_id),
+    phone_ids = list({r.applicant_id for r in shown if seen[r.id].phone})
+    phones = vault.load_fields(db, phone_ids, "phone") if phone_ids else {}
+    profiles = {
+        p.user_id: p
+        for p in db.scalars(select(ApplicantProfile).where(ApplicantProfile.user_id.in_(ids)))
+    }
+    for r in shown:
+        p = profiles.get(r.applicant_id)
+        if p is None:
+            continue
+        view = {
+            "full_name": names.get(r.applicant_id),
+            "email": emails.get(r.applicant_id),
             "angkatan": p.angkatan,
-            "skills": skills[p.user_id],
-            "phone": phones.get(p.user_id),
+            "skills": skills[r.applicant_id],
         }
+        if seen[r.id].phone:
+            view["phone"] = phones.get(r.applicant_id)
+        out[r.id] = view
     return out
 
 
@@ -128,17 +151,19 @@ def list_for_job(db: Session, user: User, job_id: str, limit: int, cursor: str |
     ))
     page = rows[:limit]
     next_cursor = jobs.encode_cursor(page[-1]) if len(rows) > limit else None
-    people = _applicant_views(db, page)
+    seen = _visibility(db, page, user)
+    people = _applicant_views(db, page, seen)
     docs = _documents_of(db, page)
     return {
-        "items": [_base_view(r, people.get(r.applicant_id), docs) for r in page],
+        "items": [_base_view(r, people[r.id], docs) for r in page],
         "next_cursor": next_cursor,
     }
 
 
-def detail_view(db: Session, row: Application) -> dict:
+def detail_view(db: Session, row: Application, user: User) -> dict:
+    seen = _visibility(db, [row], user)
     out = _base_view(
-        row, _applicant_views(db, [row]).get(row.applicant_id), _documents_of(db, [row])
+        row, _applicant_views(db, [row], seen)[row.id], _documents_of(db, [row])
     )
     out["job"] = jobs.summaries(db, [db.get(Job, row.job_id)])[0]
     out["cover_note"] = row.cover_note
