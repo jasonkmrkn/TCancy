@@ -1,7 +1,7 @@
 from sqlalchemy import text
 
 from app.db import engine
-from helpers import skill_ids
+from helpers import skill_ids, CONSENTS
 from test_document import upload
 from test_job import as_user, job_body, login, make_user
 from test_owner import apply_as, new_owner
@@ -46,7 +46,7 @@ def test_matches_score_order_and_filters(client):
 
     as_user(client, "budi", "applicant")  # profile skills are the first two: a and b
     cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
-    r = client.post("%s/jobs/%s/apply" % (URL, applied), json={"cv_document_id": cv})
+    r = client.post("%s/jobs/%s/apply" % (URL, applied), json={"cv_document_id": cv, "consents": CONSENTS})
     assert r.status_code == 201
 
     r = client.get(URL + "/me/matches")
@@ -83,7 +83,7 @@ def test_withdrawn_application_still_excluded(client):
     (job,) = alumni_with_jobs(client, [[a]])
     as_user(client, "budi", "applicant")
     cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
-    app_id = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv}).json()["id"]
+    app_id = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv, "consents": CONSENTS}).json()["id"]
     assert len(client.get(URL + "/me/matches").json()["items"]) == 0
     client.delete("%s/me/applications/%s" % (URL, app_id))
     assert client.get(URL + "/me/matches").json()["items"] == []
@@ -109,7 +109,7 @@ def test_applicant_dashboard_counts(client):
     upload(client, "ktp", "ktp.png", b"\x89PNG\r\n\x1a\n")
     app_ids = []
     for job in jobs[:6]:
-        r = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv})
+        r = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv, "consents": CONSENTS})
         app_ids.append(r.json()["id"])
     client.delete("%s/me/applications/%s" % (URL, app_ids[0]))
     sql("UPDATE applications SET status = 'accepted' WHERE id = :i", i=app_ids[1])
