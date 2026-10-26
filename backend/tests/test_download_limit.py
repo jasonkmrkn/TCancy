@@ -111,3 +111,28 @@ def test_the_four_paths_share_one_count_per_owner(client, monkeypatch):
     for suffix in PATHS:
         r = client.get(url(app_id, suffix))
         assert r.status_code == 429 and r.json()["detail"] == "DOWNLOAD_LIMIT"
+
+
+def revoke_consent(app_id, scope):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE application_consents SET revoked_at = now() "
+                "WHERE application_id = :i AND scope = :s"
+            ),
+            {"i": app_id, "s": scope},
+        )
+
+
+@pytest.mark.parametrize("suffix,scope", [("/cv", "cv"), ("/video", "video")])
+def test_attempts_refused_for_a_revoked_consent_are_counted(client, monkeypatch, suffix, scope):
+    monkeypatch.setattr(config, "DOWNLOAD_LIMIT_PER_HOUR", 3)
+    _, _, app_id = setup(client)  # CV and video both attached and consented
+    revoke_consent(app_id, scope)
+
+    for _ in range(3):
+        r = client.get(url(app_id, suffix))
+        assert r.status_code == 403 and r.json()["detail"] == "NOT_VISIBLE"
+    r = client.get(url(app_id, suffix))
+    assert r.status_code == 429 and r.json()["detail"] == "DOWNLOAD_LIMIT"
+    assert "retry-after" not in r.headers
