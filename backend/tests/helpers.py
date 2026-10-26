@@ -41,3 +41,12 @@ def make_profile(**over):
     }
     data.update(over)
     return data
+
+
+# STUB-RAYNALD
+def login_as(client, username, password="rahasia123"):
+    """Frozen interface: log in and return the headers non-GET requests need (CSRF).
+
+    Stub: returns {} and does not log in yet; tests keep logging in themselves.
+    """
+    return {}
