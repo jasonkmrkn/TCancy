@@ -4,6 +4,11 @@ from test_document import upload
 from test_job import as_user, job_body, login, make_user
 from helpers import CONSENTS, CONSENTS_WITH_VIDEO
 
+from sqlalchemy import text
+
+from app import storage
+from app.db import engine
+
 URL = "/api/v1"
 _names = itertools.count(1)
 
@@ -305,3 +310,14 @@ def test_deleted_video_is_404_only_after_the_consent_check(client):
     login(client, owner)
     r = client.get("%s/applications/%s/video" % (URL, app_id))
     assert r.status_code == 403 and r.json()["detail"] == "NOT_VISIBLE"
+
+
+def test_file_missing_on_disk_is_404(client):
+    _, _, app_id = setup(client)
+    with engine.connect() as conn:
+        keys = [r[0] for r in conn.execute(text("SELECT storage_key FROM documents WHERE type = 'cv'"))]
+    assert keys
+    for key in keys:
+        storage.delete(key)
+    r = client.get("%s/applications/%s/cv" % (URL, app_id))
+    assert r.status_code == 404 and r.json()["detail"] == "DOCUMENT_NOT_FOUND"

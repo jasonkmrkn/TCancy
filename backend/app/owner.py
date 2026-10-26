@@ -1,3 +1,4 @@
+import itertools
 import uuid
 from datetime import datetime, timezone
 
@@ -197,13 +198,23 @@ def change_status(db: Session, user: User, app_id: str, status: str, note: str |
     return row
 
 
-def _file_response(db: Session, doc: Document | None, filename: str) -> StreamingResponse:
-    if doc is None:
+def _file_response(db: Session, document_id, filename: str) -> StreamingResponse:
+    meta = documents.get_meta(db, document_id) if document_id else None
+    if meta is None:
+        raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
+    try:
+        chunks = iter(documents.stream(db, meta.id))
+        # Read the first chunk now, so a failure becomes a proper error response
+        # instead of a broken download.
+        first = next(chunks, b"")
+    except storage.StorageError:
         raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
     return StreamingResponse(
-        documents.stream(db, doc.id),
-        media_type=documents.MEDIA_TYPES.get(doc.ext, "application/octet-stream"),
-        headers={"Content-Disposition": 'attachment; filename="%s.%s"' % (filename, doc.ext)},
+        itertools.chain([first], chunks),
+        media_type=documents.MEDIA_TYPES.get(meta.ext, "application/octet-stream"),
+        headers={
+            "Content-Disposition": 'attachment; filename="%s.%s"' % (filename, meta.ext)
+        },
     )
 
 
@@ -214,37 +225,32 @@ def _not_visible() -> HTTPException:
 def cv_file(db: Session, row: Application, user: User) -> StreamingResponse:
     if not _visibility(db, [row], user)[row.id].cv:
         raise _not_visible()
-    doc = db.get(Document, row.cv_document_id) if row.cv_document_id else None
-    return _file_response(db, doc, "cv")
+    return _file_response(db, row.cv_document_id, "cv")
 
 
 def video_file(db: Session, row: Application, user: User) -> StreamingResponse:
     if not _visibility(db, [row], user)[row.id].video:
         raise _not_visible()
-    doc = db.get(Document, row.intro_video_document_id) if row.intro_video_document_id else None
-    return _file_response(db, doc, "intro_video")
+    return _file_response(db, row.intro_video_document_id, "intro_video")
 
 
-def _ktp(db: Session, row: Application) -> Document | None:
-    return db.scalar(
-        select(Document)
-        .where(Document.owner_id == row.applicant_id, Document.type == "ktp")
-        .order_by(Document.created_at.desc())
-    )
+def _ktp_id(db: Session, row: Application) -> str | None:
+    """The applicant's newest ID card document, found through the documents interface."""
+    cards = [d for d in documents.list_for_owner(db, row.applicant_id) if d["type"] == "ktp"]
+    return cards[-1]["id"] if cards else None
 
 
 def identity_view(db: Session, row: Application) -> dict:
-    ktp = _ktp(db, row)
     return {
         "nik": vault.load_field(db, row.applicant_id, "nik"),
         "address": vault.load_field(db, row.applicant_id, "address"),
         "birth_date": vault.load_field(db, row.applicant_id, "birth_date"),
-        "ktp_available": ktp is not None,
+        "ktp_available": _ktp_id(db, row) is not None,
     }
 
 
 def ktp_file(db: Session, row: Application) -> StreamingResponse:
-    ktp = _ktp(db, row)
-    if ktp is None:
+    ktp_id = _ktp_id(db, row)
+    if ktp_id is None:
         raise HTTPException(status_code=404, detail="NO_KTP")
-    return _file_response(db, ktp, "ktp")
+    return _file_response(db, ktp_id, "ktp")
