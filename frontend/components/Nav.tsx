@@ -193,7 +193,7 @@ export default function Nav() {
                 </Link>
                 <Link
                   href="/register"
-                  className={`rounded-full bg-emerald-700 px-4 py-2 text-sm font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] transition duration-300 ${EASE} hover:bg-emerald-800 ${PUSH}`}
+                  className={`rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] transition duration-300 ${EASE} hover:bg-zinc-800 ${PUSH}`}
                 >
                   Register
                 </Link>
@@ -254,7 +254,7 @@ export default function Nav() {
                   <Link
                     href="/register"
                     tabIndex={mobileOpen ? 0 : -1}
-                    className={`rounded-full bg-emerald-700 px-4 py-2.5 text-center text-sm font-medium text-white ${PUSH}`}
+                    className={`rounded-full bg-zinc-900 px-4 py-2.5 text-center text-sm font-medium text-white ${PUSH}`}
                   >
                     Register
                   </Link>
