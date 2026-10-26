@@ -6,6 +6,11 @@ from test_job import as_user, job_body, login, make_user
 URL = "/api/v1"
 _names = itertools.count(1)
 
+# Uploads are typed by their content, so these start with real magic bytes.
+CV_BYTES = b"%PDF-1.4 cv bytes"
+VIDEO_BYTES = b"\x00\x00\x00\x18ftypmp42 video bytes"
+KTP_BYTES = b"\x89PNG\r\n\x1a\n png bytes"
+
 
 def new_owner(client, role="alumni"):
     name = "boss%d" % next(_names)
@@ -18,10 +23,10 @@ def new_owner(client, role="alumni"):
 def apply_as(client, job_id, username, with_video=True):
     """Register an applicant, upload documents, apply. Returns the application id."""
     as_user(client, username, "applicant")
-    cv = upload(client, "cv", "cv.pdf", b"%PDF cv bytes").json()["id"]
+    cv = upload(client, "cv", "cv.pdf", CV_BYTES).json()["id"]
     body = {"cv_document_id": cv, "cover_note": "Hello"}
     if with_video:
-        body["intro_video_document_id"] = upload(client, "intro_video", "v.mp4", b"video bytes").json()["id"]
+        body["intro_video_document_id"] = upload(client, "intro_video", "v.mp4", VIDEO_BYTES).json()["id"]
     r = client.post("%s/jobs/%s/apply" % (URL, job_id), json=body)
     assert r.status_code == 201
     return r.json()["id"]
@@ -176,10 +181,10 @@ def test_status_visible_to_applicant(client):
 def test_download_cv_and_video(client):
     _, _, app_id = setup(client)
     r = client.get("%s/applications/%s/cv" % (URL, app_id))
-    assert r.status_code == 200 and r.content == b"%PDF cv bytes"
+    assert r.status_code == 200 and r.content == CV_BYTES
     assert "attachment" in r.headers["content-disposition"]
     r = client.get("%s/applications/%s/video" % (URL, app_id))
-    assert r.status_code == 200 and r.content == b"video bytes"
+    assert r.status_code == 200 and r.content == VIDEO_BYTES
 
 
 def test_video_missing_404(client):
@@ -203,12 +208,12 @@ def test_identity_and_ktp(client):
 
     client.post(URL + "/auth/logout")
     login(client, "budi")
-    assert upload(client, "ktp", "ktp.png", b"png bytes").status_code == 201
+    assert upload(client, "ktp", "ktp.png", KTP_BYTES).status_code == 201
     client.post(URL + "/auth/logout")
     login(client, owner)
     assert client.get("%s/applications/%s/identity" % (URL, app_id)).json()["ktp_available"] is True
     r = client.get("%s/applications/%s/identity/ktp" % (URL, app_id))
-    assert r.status_code == 200 and r.content == b"png bytes"
+    assert r.status_code == 200 and r.content == KTP_BYTES
     assert r.headers["content-type"] == "image/png"
 
 

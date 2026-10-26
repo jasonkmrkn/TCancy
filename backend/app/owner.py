@@ -2,11 +2,11 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app import applications, documents, jobs, storage, vault
+from app import applications, documents, jobs, vault
 from app.models import (
     Application,
     ApplicantProfile,
@@ -165,25 +165,24 @@ def change_status(db: Session, user: User, app_id: str, status: str, note: str |
     return row
 
 
-def _file_response(doc: Document | None, filename: str) -> FileResponse:
-    if doc is None or not storage.exists(doc.storage_key):
+def _file_response(db: Session, doc: Document | None, filename: str) -> StreamingResponse:
+    if doc is None:
         raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
-    return FileResponse(
-        storage.path_of(doc.storage_key),
+    return StreamingResponse(
+        documents.stream(db, doc.id),
         media_type=documents.MEDIA_TYPES.get(doc.ext, "application/octet-stream"),
-        filename="%s.%s" % (filename, doc.ext),
-        content_disposition_type="attachment",
+        headers={"Content-Disposition": 'attachment; filename="%s.%s"' % (filename, doc.ext)},
     )
 
 
-def cv_file(db: Session, row: Application) -> FileResponse:
+def cv_file(db: Session, row: Application) -> StreamingResponse:
     doc = db.get(Document, row.cv_document_id) if row.cv_document_id else None
-    return _file_response(doc, "cv")
+    return _file_response(db, doc, "cv")
 
 
-def video_file(db: Session, row: Application) -> FileResponse:
+def video_file(db: Session, row: Application) -> StreamingResponse:
     doc = db.get(Document, row.intro_video_document_id) if row.intro_video_document_id else None
-    return _file_response(doc, "intro_video")
+    return _file_response(db, doc, "intro_video")
 
 
 def _ktp(db: Session, row: Application) -> Document | None:
@@ -200,12 +199,12 @@ def identity_view(db: Session, row: Application) -> dict:
         "nik": vault.load_field(db, row.applicant_id, "nik"),
         "address": vault.load_field(db, row.applicant_id, "address"),
         "birth_date": vault.load_field(db, row.applicant_id, "birth_date"),
-        "ktp_available": ktp is not None and storage.exists(ktp.storage_key),
+        "ktp_available": ktp is not None,
     }
 
 
-def ktp_file(db: Session, row: Application) -> FileResponse:
+def ktp_file(db: Session, row: Application) -> StreamingResponse:
     ktp = _ktp(db, row)
-    if ktp is None or not storage.exists(ktp.storage_key):
+    if ktp is None:
         raise HTTPException(status_code=404, detail="NO_KTP")
-    return _file_response(ktp, "ktp")
+    return _file_response(db, ktp, "ktp")
