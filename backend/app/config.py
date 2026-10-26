@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlsplit
 
 def _int_env(name, default, lo=None, hi=None):
     raw = os.environ.get(name, "").strip()
@@ -22,10 +23,33 @@ def _choice_env(name, default, allowed):
         raise ValueError(f"{name} must be one of {', '.join(allowed)}, got {raw!r}")
     return raw
 
+def _origin_env(name, default):
+    """One origin: scheme + host [+ port]. Returned in the form browsers send in `Origin`."""
+    raw = os.environ.get(name, "").strip() or default
+    problem = f"{name} must be a single origin such as https://example.com (no path, no trailing slash), got {raw!r}"
+    if "," in raw or any(c.isspace() for c in raw):
+        raise ValueError(problem)
+    try:
+        parts = urlsplit(raw)
+        port = parts.port
+    except ValueError:
+        raise ValueError(problem) from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(problem)
+    if parts.path or parts.query or parts.fragment or parts.username or parts.password:
+        raise ValueError(problem)
+    host = parts.hostname  
+    if not all(c in "abcdefghijklmnopqrstuvwxyz0123456789.-_:" for c in host):
+        raise ValueError(problem)  
+    if ":" in host:
+        host = f"[{host}]"
+    default_port = 443 if parts.scheme == "https" else 80
+    return f"{parts.scheme}://{host}" + (f":{port}" if port not in (None, default_port) else "")
+
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql+psycopg://tcancy:tcancy@localhost:5433/tcancy"
 )
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000")
+FRONTEND_ORIGIN = _origin_env("FRONTEND_ORIGIN", "http://localhost:3000")
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "./uploads")
 
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
