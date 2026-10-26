@@ -1,10 +1,7 @@
 import json
+import logging
 import re
 import uuid
-import logging
-
-log = logging.getLogger("tcancy.audit")
-
 from contextlib import contextmanager
 
 from fastapi import Request
@@ -13,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.clientip import client_address
 from app.models import AuditLog, Base
+
+log = logging.getLogger("tcancy.audit")
 
 EXTRA_FIELDS = frozenset({
     "password", "full_name", "email", "phone", "nik", "address", "birth_date", "profile", "documents",
@@ -65,6 +64,7 @@ def client(request: Request) -> dict:
     """The ip and user_agent of a request, to pass on as record(..., **audit.client(request))."""
     return {"ip": client_address(request), "user_agent": request.headers.get("user-agent")}
 
+
 @contextmanager
 def quietly(db: Session, action: str):
     try:
@@ -72,6 +72,7 @@ def quietly(db: Session, action: str):
     except Exception as exc:
         db.rollback()
         log.error("audit entry %s could not be written (%s)", action, type(exc).__name__)
+
 
 def _clean(value, limit: int) -> str | None:
     """Text safe to store: no control characters (NUL makes PostgreSQL refuse the row), cut to size."""

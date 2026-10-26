@@ -3,7 +3,6 @@ import logging
 import uuid
 from contextlib import contextmanager
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 

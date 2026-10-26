@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from app import audit
-from app.db import SessionLocal, engine
+from app.db import engine
 from test_audit_events import entries, forget
 from test_job import login, make_user
 
