@@ -128,6 +128,12 @@ def detail_view(db: Session, row: Application) -> dict:
             str(row.intro_video_document_id) if row.intro_video_document_id else None
         ),
         "created_at": row.created_at.isoformat(),
+        "consents": consent.views_of(db, row.id),
+        "identity_access_expires_at": (
+            row.identity_access_expires_at.isoformat()
+            if row.identity_access_expires_at
+            else None
+        ),        
         "history": history_of(db, row.id),
     }
 

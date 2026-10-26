@@ -76,3 +76,24 @@ def is_active(db: Session, application_id: uuid.UUID, scope: str) -> bool:
         )
     )
     return row is not None and row.granted_at is not None and row.revoked_at is None
+
+
+def views_of(db: Session, application_id: uuid.UUID) -> list[dict]:
+    rows = db.scalars(
+        select(ApplicationConsent).where(
+            ApplicationConsent.application_id == application_id
+        )
+    ).all()
+    rows = sorted(
+        rows,
+        key=lambda r: SCOPES.index(r.scope) if r.scope in SCOPES else len(SCOPES),
+    )
+    return [
+        {
+            "scope": r.scope,
+            "version": version_label(r.version),
+            "granted_at": r.granted_at.isoformat(),
+            "revoked_at": r.revoked_at.isoformat() if r.revoked_at else None,
+        }
+        for r in rows
+    ]
