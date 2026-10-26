@@ -43,9 +43,10 @@ def _head(pieces, limit: int) -> bytes:
 
 
 def copies_of(db: Session, doc_id) -> list[DocumentCopy]:
-    """The document's copies in CIPHERS order (only aes under the production policy)."""
+    """The document's copies in CIPHERS order. Under production only aes, even when older des/rc4
+    copies are still stored."""
     rows = {c.algorithm: c for c in db.scalars(select(DocumentCopy).where(DocumentCopy.document_id == doc_id))}
-    return [rows[alg] for alg in CIPHERS if alg in rows]
+    return [rows[alg] for alg in CIPHERS if alg in rows and alg in documents._algorithms()]
 
 
 def ciphertext_view(db: Session, user: User, doc_id: str, preview_bytes: int) -> dict:
