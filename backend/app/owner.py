@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app import applications, config, consent, documents, jobs, policy, vault
+from app import applications, config, consent, documents, jobs, policy, ratelimit, vault
 from app.models import (
     Application,
     ApplicantProfile,
@@ -238,13 +238,28 @@ def _not_visible() -> HTTPException:
     return HTTPException(status_code=403, detail="NOT_VISIBLE")
 
 
+def _count_download(user: User) -> None:
+    """One hit per download attempt, shared by the CV, video, identity and ID card paths.
+
+    Each download function calls this first. The router has already found the application
+    by then, so another owner's application stays a plain 404 and is not counted, while a
+    refused attempt (no consent, locked or expired identity) is counted. A broken backend
+    raises RateLimitUnavailable, which main.py turns into 503.
+    """
+    result = ratelimit.hit("download", str(user.id), config.DOWNLOAD_LIMIT_PER_HOUR, 3600)
+    if not result.allowed:
+        raise HTTPException(status_code=429, detail="DOWNLOAD_LIMIT")
+
+
 def cv_file(db: Session, row: Application, user: User) -> StreamingResponse:
+    _count_download(user)
     if not _visibility(db, [row], user)[row.id].cv:
         raise _not_visible()
     return _file_response(db, row.cv_document_id, "cv")
 
 
 def video_file(db: Session, row: Application, user: User) -> StreamingResponse:
+    _count_download(user)
     if not _visibility(db, [row], user)[row.id].video:
         raise _not_visible()
     return _file_response(db, row.intro_video_document_id, "intro_video")
@@ -266,6 +281,7 @@ def _require_identity(db: Session, row: Application, user: User) -> None:
 
 
 def identity_view(db: Session, row: Application, user: User) -> dict:
+    _count_download(user)
     _require_identity(db, row, user)
     return {
         "nik": vault.load_field(db, row.applicant_id, "nik"),
@@ -276,6 +292,7 @@ def identity_view(db: Session, row: Application, user: User) -> dict:
 
 
 def ktp_file(db: Session, row: Application, user: User) -> StreamingResponse:
+    _count_download(user)
     _require_identity(db, row, user)
     ktp_id = _ktp_id(db, row)
     if ktp_id is None:
