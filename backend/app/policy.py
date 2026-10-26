@@ -41,17 +41,13 @@ IDENTITY_EXPIRED = "expired"
 IDENTITY_AVAILABLE = "available"
 
 
-def identity_state(
-    status: str, active_scopes, expires_at: datetime | None, now: datetime, caller_role: str
-) -> str:
-    """Whether the job owner may open the applicant's identity data.
+def identity_window(status: str, active_scopes, expires_at: datetime | None, now: datetime) -> str:
+    """The state of the identity access window itself, whoever is asking.
 
     Open only when the application is accepted, the identity consent is active and the
     access window (set when the application was first accepted) has not passed. A window
     that was never recorded keeps the data locked. `now` comes from the caller.
     """
-    if caller_role not in OWNER_ROLES:
-        return IDENTITY_LOCKED
     if status != "accepted" or "identity" not in frozenset(active_scopes):
         return IDENTITY_LOCKED
     if expires_at is None:
@@ -59,6 +55,21 @@ def identity_state(
     if now > expires_at:
         return IDENTITY_EXPIRED
     return IDENTITY_AVAILABLE
+
+
+def identity_window_open(status: str, active_scopes, expires_at: datetime | None, now: datetime) -> bool:
+    """True while the identity window is open. The dashboards use this."""
+    return identity_window(status, active_scopes, expires_at, now) == IDENTITY_AVAILABLE
+
+
+def identity_state(
+    status: str, active_scopes, expires_at: datetime | None, now: datetime, caller_role: str
+) -> str:
+    """Whether the job owner may open the applicant's identity data: the window rule above,
+    and only for an owner role."""
+    if caller_role not in OWNER_ROLES:
+        return IDENTITY_LOCKED
+    return identity_window(status, active_scopes, expires_at, now)
 
 
 def shown_expiry(state: str, expires_at: datetime | None) -> datetime | None:

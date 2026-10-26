@@ -135,3 +135,48 @@ def test_expiry_is_shown_only_when_not_locked():
 def test_identity_scopes_can_be_any_iterable():
     assert state(scopes={"identity"}) == "available"
     assert state(scopes=iter(["identity"])) == "available"
+
+
+def window(status="accepted", scopes=("identity",), expires_at=LATER, now=NOW):
+    return policy.identity_window(status, scopes, expires_at, now)
+
+
+def test_window_states_do_not_depend_on_a_role():
+    assert window() == "available"
+    assert window(now=LATER) == "available"
+    assert window(now=LATER + timedelta(seconds=1)) == "expired"
+    assert window(expires_at=None) == "locked"
+    assert window(scopes=[]) == "locked"
+    assert window(status="shortlisted") == "locked"
+    # past the window it is still locked, not expired, unless accepted with the consent
+    assert window(status="rejected", now=PAST_WINDOW) == "locked"
+    assert window(scopes=[], now=PAST_WINDOW) == "locked"
+
+
+def test_window_scopes_can_be_any_iterable():
+    assert window(scopes={"identity"}) == "available"
+    assert window(scopes=iter(["identity"])) == "available"
+
+
+def test_identity_state_is_the_window_for_owner_roles():
+    for status in STATUSES:
+        for scopes in ((), ("identity",), ("profile", "cv", "video"), ALL_SCOPES):
+            for when in (NOW, LATER, PAST_WINDOW):
+                for expires_at in (None, LATER):
+                    expected = policy.identity_window(status, scopes, expires_at, when)
+                    for role in ("alumni", "admin"):
+                        assert policy.identity_state(status, scopes, expires_at, when, role) == expected
+
+
+def test_window_open_is_true_only_while_available():
+    assert policy.identity_window_open("accepted", ["identity"], LATER, NOW) is True
+    assert policy.identity_window_open("accepted", ["identity"], LATER, PAST_WINDOW) is False
+    assert policy.identity_window_open("accepted", ["identity"], None, NOW) is False
+    assert policy.identity_window_open("accepted", [], LATER, NOW) is False
+    assert policy.identity_window_open("shortlisted", ["identity"], LATER, NOW) is False
+    for status in STATUSES:
+        for scopes in ((), ("identity",), ALL_SCOPES):
+            for when in (NOW, LATER, PAST_WINDOW):
+                for expires_at in (None, LATER):
+                    opened = policy.identity_window_open(status, scopes, expires_at, when)
+                    assert opened is (policy.identity_window(status, scopes, expires_at, when) == "available")
