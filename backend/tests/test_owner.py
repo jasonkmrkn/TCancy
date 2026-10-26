@@ -1,4 +1,5 @@
 import itertools
+from datetime import datetime, timedelta, timezone
 
 from test_document import upload
 from test_job import as_user, job_body, login, make_user
@@ -6,7 +7,7 @@ from helpers import CONSENTS, CONSENTS_WITH_VIDEO
 
 from sqlalchemy import text
 
-from app import storage
+from app import config, storage
 from app.db import engine
 
 URL = "/api/v1"
@@ -324,3 +325,64 @@ def test_file_missing_on_disk_is_500_storage_error(client):
         storage.delete(key)
     r = client.get("%s/applications/%s/cv" % (URL, app_id))
     assert r.status_code == 500 and r.json()["detail"] == "STORAGE_ERROR"
+
+
+def window_of(app_id):
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT accepted_at, identity_access_expires_at FROM applications WHERE id = :i"),
+            {"i": app_id},
+        ).one()
+    return tuple(row)
+
+
+def test_first_acceptance_opens_the_identity_window(client):
+    _, _, app_id = setup(client)
+    assert window_of(app_id) == (None, None)
+    path = "%s/applications/%s/status" % (URL, app_id)
+
+    before = datetime.now(timezone.utc)
+    assert client.patch(path, json={"status": "accepted"}).status_code == 200
+    after = datetime.now(timezone.utc)
+
+    accepted_at, expires_at = window_of(app_id)
+    assert before <= accepted_at <= after
+    assert expires_at - accepted_at == timedelta(days=config.IDENTITY_ACCESS_DAYS)
+
+    # the applicant sees when the window ends
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    mine = client.get("%s/me/applications/%s" % (URL, app_id)).json()
+    assert datetime.fromisoformat(mine["identity_access_expires_at"]) == expires_at
+
+
+def test_flip_flopping_does_not_move_the_window(client):
+    _, _, app_id = setup(client)
+    path = "%s/applications/%s/status" % (URL, app_id)
+    assert client.patch(path, json={"status": "accepted"}).status_code == 200
+    first = window_of(app_id)
+
+    assert client.patch(path, json={"status": "shortlisted"}).status_code == 200
+    assert window_of(app_id) == first
+    assert client.patch(path, json={"status": "accepted"}).status_code == 200
+    assert window_of(app_id) == first
+    assert client.patch(path, json={"status": "rejected"}).status_code == 200
+    assert window_of(app_id) == first
+
+
+def test_shortlist_and_reject_never_open_the_window(client):
+    _, _, app_id = setup(client)
+    path = "%s/applications/%s/status" % (URL, app_id)
+    assert client.patch(path, json={"status": "shortlisted"}).status_code == 200
+    assert window_of(app_id) == (None, None)
+    assert client.patch(path, json={"status": "rejected"}).status_code == 200
+    assert window_of(app_id) == (None, None)
+
+
+def test_window_follows_the_configured_days(client, monkeypatch):
+    monkeypatch.setattr(config, "IDENTITY_ACCESS_DAYS", 7)
+    _, _, app_id = setup(client)
+    path = "%s/applications/%s/status" % (URL, app_id)
+    assert client.patch(path, json={"status": "accepted"}).status_code == 200
+    accepted_at, expires_at = window_of(app_id)
+    assert expires_at - accepted_at == timedelta(days=7)
