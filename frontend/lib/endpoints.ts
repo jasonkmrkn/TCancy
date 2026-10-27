@@ -285,6 +285,10 @@ export const documents = {
     },
     downloadUrl: (id: string) => `${FILES}/me/documents/${id}/download`,
     remove: (id: string) => api<void>(`/me/documents/${id}`, { method: 'DELETE' }),
+    /** Encryption benchmark on one of your own documents. The response is not typed by the backend. */
+    benchmark: (id: string, repeats: number) =>
+        api<unknown>(`/me/documents/${id}/benchmark`, { method: 'POST', body: { repeats } }),
+    ciphertextUrl: (id: string) => `${FILES}/me/documents/${id}/ciphertext`,
 };
 
 export const jobs = {

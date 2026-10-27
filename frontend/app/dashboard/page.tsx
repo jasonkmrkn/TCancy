@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, ArrowUpRight, ArrowClockwise, Plus, ShieldCheck } from '@phosphor-icons/react';
 import { stagger } from '@/components/AuthShell';
+import BenchmarkCompare from '@/components/BenchmarkCompare';
 import { FormAlert } from '@/components/FormField';
 import { SECTION_LABEL } from '@/components/home/Band';
 import VacancyRow from '@/components/VacancyRow';
@@ -380,7 +381,11 @@ function ApplicantDashboard() {
         )}
       </section>
 
-      <section className="rise" style={stagger(4)} aria-label="Recommended for you">
+      <div className="rise" style={stagger(4)}>
+        <BenchmarkCompare />
+      </div>
+
+      <section className="rise" style={stagger(5)} aria-label="Recommended for you">
         <SectionHead title="Recommended for you" href="/vacancy" linkLabel="All vacancies" />
         {data.matches.length === 0 ? (
           <p className="mt-6 rounded-[2rem] border border-dashed border-zinc-300 px-8 py-10 text-zinc-500">

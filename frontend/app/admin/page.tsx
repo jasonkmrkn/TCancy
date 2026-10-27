@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowClockwise, Check, MagnifyingGlass, Quotes, ShieldCheck, X } from '@phosphor-icons/react';
+import BenchmarksTab from '@/components/admin/BenchmarksTab';
 import Chip from '@/components/Chip';
 import FormField, { FormAlert, inputClass, textareaClass } from '@/components/FormField';
 import { SECTION_LABEL } from '@/components/home/Band';
@@ -26,13 +27,14 @@ import { initials } from '@/lib/labels';
 /* Shared bits                                                         */
 /* ------------------------------------------------------------------ */
 
-type Tab = 'overview' | 'alumni' | 'testimonials' | 'users';
+type Tab = 'overview' | 'alumni' | 'testimonials' | 'users' | 'benchmarks';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'alumni', label: 'Alumni verification' },
   { key: 'testimonials', label: 'Testimonials' },
   { key: 'users', label: 'Users' },
+  { key: 'benchmarks', label: 'Benchmarks' },
 ];
 
 const EASE = 'ease-[cubic-bezier(0.16,1,0.3,1)]';
@@ -752,6 +754,7 @@ export default function AdminPage() {
         {tab === 'alumni' && <AlumniTab />}
         {tab === 'testimonials' && <TestimonialsTab />}
         {tab === 'users' && <UsersTab />}
+        {tab === 'benchmarks' && <BenchmarksTab />}
       </div>
     </div>
   );
