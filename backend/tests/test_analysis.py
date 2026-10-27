@@ -291,8 +291,9 @@ def test_audit_details_are_numbers_only(client, monkeypatch):
     client.post(API + "/auth/logout")
     admin(client)
     client.post(ADMIN + "/run", json={"sizes": [16], "repeats": 1})
-    by_action = {c["action"]: c["details"] for c in calls}
-    assert {"document.ciphertext_view", "document.benchmark", "admin.benchmark_run"} <= set(by_action)
+    wanted = ("document.ciphertext_view", "document.benchmark", "admin.benchmark_run")
+    by_action = {c["action"]: c["details"] for c in calls if c["action"] in wanted}
+    assert set(wanted) <= set(by_action)
     for action in ("document.ciphertext_view", "document.benchmark", "admin.benchmark_run"):
         details = by_action[action]
         assert details and all(isinstance(v, int) and not isinstance(v, bool) for v in details.values())

@@ -20,6 +20,7 @@ EXTRA_FIELDS = frozenset({
 _ACTION = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")  # auth.login, account.delete
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")  # keys, roles, target types, field names
 _WORD = re.compile(r"^[a-z][a-z0-9_.]{0,63}$")  # a text value inside details
+_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")  
 _CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 _MAX_ACTION = 64
 _MAX_IP = 64
@@ -111,10 +112,10 @@ def _check_value(key: str, value):
         if abs(value) > _MAX_INT:
             raise ValueError("details[%r] is out of range" % key)
     elif isinstance(value, str):
-        if not _WORD.match(value):
+        if not (_WORD.match(value) or _CODE.match(value)):
             raise ValueError("details[%r] must be a number or a field name" % key)
     elif isinstance(value, (list, tuple)):
-        if len(value) > _MAX_LIST or not all(isinstance(v, str) and _WORD.match(v) for v in value):
+        if len(value) > _MAX_LIST or not all(isinstance(v, str) and (_WORD.match(v) or _CODE.match(v)) for v in value):
             raise ValueError("details[%r] must be a short list of field names" % key)
     else:
         raise ValueError("details[%r] must be a number or a field name" % key)

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy.orm import Session
 
-from app import analysis, audit, benchmarks, clientip
+from app import analysis, audit, benchmarks
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
@@ -16,12 +16,12 @@ class BenchmarkIn(BaseModel):
     repeats: StrictInt = Field(default=5, ge=1, le=10)
 
 
-def _audit(db: Session, request: Request, user: User, action: str, doc_id: str, details: dict) -> None:
+def _audit(db: Session, request: Request, user: User, action: str, doc_id: str, **counts: int) -> None:
     audit.record(
         db, actor_id=user.id, actor_role=user.role, action=action,
         target_type="document", target_id=doc_id,
-        ip=clientip.client_ip(request), user_agent=request.headers.get("user-agent"),
-        details=details,
+        details=audit.details(**counts),
+        **audit.client(request),
     )
     db.commit()
 
@@ -37,7 +37,7 @@ def ciphertext(
     view = analysis.ciphertext_view(db, user, doc_id, preview)
     doc = view["document"]
     _audit(db, request, user, "document.ciphertext_view", doc["id"],
-           {"copies": len(view["copies"]), "size": doc["size"], "bytes": view["preview_bytes"]})
+           copies=len(view["copies"]), size=doc["size"], bytes=view["preview_bytes"])
     return view
 
 
@@ -53,5 +53,5 @@ def benchmark(
     result = benchmarks.run_document(db, user, doc_id, repeats)
     doc = result["document"]
     _audit(db, request, user, "document.benchmark", doc["id"],
-           {"repeats": repeats, "copies": len(result["results"]), "size": doc["size"]})
+           repeats=repeats, copies=len(result["results"]), size=doc["size"])
     return result

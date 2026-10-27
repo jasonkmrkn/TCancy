@@ -4,6 +4,8 @@ The caller passes only names, counts and ids in details, never a personal value 
 NIK, address, phone, password or token). The entry joins the caller's transaction and is
 committed with it, like the audit calls in the documents router.
 """
+from app import audit
+from app.models import User
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -28,8 +30,7 @@ def log(
         action=action,
         target_type=target_type,
         target_id=None if target_id is None else str(target_id),
-        ip=clientip.client_ip(request),
-        user_agent=request.headers.get("user-agent"),
         details=details,
+        **audit.client(request),
     )
     db.commit()

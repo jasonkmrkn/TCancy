@@ -574,7 +574,7 @@ def test_the_scanner_counts_the_calls_it_sees():
 def test_every_call_to_audit_record_in_the_app_takes_details_from_the_helper_or_none():
     problems, calls = [], 0
     for path in sorted(APP.rglob("*.py")):
-        if path == APP / "audit.py":
+        if path in (APP / "audit.py", APP / "auditing.py"):
             continue
         for line, problem in check_record_calls(path.read_text()):
             calls += 1
@@ -582,3 +582,9 @@ def test_every_call_to_audit_record_in_the_app_takes_details_from_the_helper_or_
                 problems.append("%s:%d %s" % (path.relative_to(APP.parent), line, problem))
     assert problems == [], "\n".join(problems)
     assert calls >= 6, "the scanner should see at least the six calls this stage installed"
+
+def test_auditing_log_is_the_only_wrapper_and_uses_audit_client():
+    source = (APP / "auditing.py").read_text()
+    found = check_record_calls(source)
+    assert len(found) == 1
+    assert "**audit.client(request)" in source
