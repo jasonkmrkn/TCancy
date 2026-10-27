@@ -1,3 +1,68 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Staggered load-in: set style={{ '--i': n }} on each block. transform/opacity only. */
+@keyframes rise {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes twinkle {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.2;
+    }
+}
+
+.rise {
+    animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+.twinkle {
+    animation: twinkle 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .rise,
+    .twinkle {
+        animation: none;
+    }
+}
+
+@keyframes drift {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-8px);
+    }
+}
+
+.drift {
+    animation: drift var(--dur, 7s) ease-in-out infinite;
+    animation-delay: var(--d, 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .drift {
+        animation: none;
+    }
+}
