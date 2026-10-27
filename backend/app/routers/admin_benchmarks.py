@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy.orm import Session
 
-from app import audit, benchmarks, clientip
+from app import audit, benchmarks
 from app.db import get_db
 from app.deps import require_role
 from app.models import User
@@ -34,8 +34,8 @@ def run(
     result = benchmarks.run_synthetic(db, user, body.sizes, body.repeats)
     audit.record(
         db, actor_id=user.id, actor_role=user.role, action="admin.benchmark_run",
-        ip=clientip.client_ip(request), user_agent=request.headers.get("user-agent"),
-        details={"run_no": result["run_no"], "samples": result["samples"], "total_bytes": result["total_bytes"]},
+        details=audit.details(run_no=result["run_no"], samples=result["samples"], total_bytes=result["total_bytes"]),
+        **audit.client(request),
     )
     db.commit()
     return {"run_no": result["run_no"], "samples": result["samples"]}

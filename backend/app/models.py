@@ -2,6 +2,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    DDL,
     BigInteger,
     Boolean,
     Date,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -297,7 +299,10 @@ class ApplicationConsent(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
-    __table_args__ = (Index("ix_audit_logs_actor_id_created_at", "actor_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_audit_logs_actor_id_created_at", "actor_id", "created_at"),
+        Index("ix_audit_logs_target_id_created_at", "target_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -314,6 +319,22 @@ class AuditLog(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+
+Index("ix_audit_logs_created_at_id", AuditLog.__table__.c.created_at.desc(), AuditLog.__table__.c.id.desc())
+
+AUDIT_APPEND_ONLY_SQL = (
+    """CREATE OR REPLACE FUNCTION audit_logs_reject_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_logs is append-only, UPDATE and DELETE are not allowed'
+        USING ERRCODE = 'restrict_violation';
+END;
+$$""",
+    """CREATE TRIGGER audit_logs_append_only BEFORE UPDATE OR DELETE ON audit_logs
+FOR EACH STATEMENT EXECUTE FUNCTION audit_logs_reject_change()""",
+    "ALTER TABLE audit_logs ENABLE ALWAYS TRIGGER audit_logs_append_only",
+)
+for _statement in AUDIT_APPEND_ONLY_SQL:
+    event.listen(AuditLog.__table__, "after_create", DDL(_statement))
 
 class EncryptedField(Base):
     __tablename__ = "encrypted_fields"

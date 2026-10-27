@@ -24,7 +24,7 @@ def apply(
 ):
     row = applications.apply(db, user, job_id, body)
     auditing.log(db, request, user, "application.apply", "application", row.id,
-                 {"consents": len(body.consents), "video": body.intro_video_document_id is not None})
+                    {"consents": len(body.consents), "video": int(body.intro_video_document_id is not None)})
     return applications.detail_view(db, row)
 
 

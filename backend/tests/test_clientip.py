@@ -151,3 +151,47 @@ def test_a_trusted_proxies_list_that_trusts_everyone_or_is_broken_stops_the_app(
     done = load_config(TRUSTED_PROXIES=value)
     assert done.returncode != 0
     assert "TRUSTED_PROXIES" in done.stderr
+
+# --- client_address: the exact address, found by the same rules ------------------
+
+from app.clientip import client_address  # noqa: E402
+
+
+def test_the_exact_address_keeps_all_of_an_ipv6_address():
+    assert client_address(req("2001:db8:1:2:aaaa:bbbb:cccc:dddd"), ()) == "2001:db8:1:2:aaaa:bbbb:cccc:dddd"
+    assert client_ip(req("2001:db8:1:2:aaaa:bbbb:cccc:dddd"), ()) == "2001:db8:1:2::/64"  # the key is unchanged
+
+
+@pytest.mark.parametrize(
+    "peer,header,proxies,expected",
+    [
+        ("203.0.113.9", None, (), "203.0.113.9"),
+        ("203.0.113.9", "1.2.3.4", (), "203.0.113.9"),
+        ("::ffff:203.0.113.9", None, (), "203.0.113.9"),
+        ("testclient", "1.2.3.4", NETS("10.0.0.0/8"), "testclient"),
+        (None, None, (), "unknown"),
+        ("172.18.0.2", "6.6.6.6, 1.1.1.1, 198.51.100.7", NEXT, "198.51.100.7"),
+        ("172.18.0.2", "198.51.100.7, 172.18.0.9", NEXT, "198.51.100.7"),
+        ("172.18.0.2", "198.51.100.7, not-an-ip", NEXT, "172.18.0.2"),
+        ("172.18.0.2", "172.18.0.9", NEXT, "172.18.0.2"),
+        ("203.0.113.9", "198.51.100.7", NEXT, "203.0.113.9"),
+        ("172.18.0.2", "[2001:db8:1:2::9]:443", NEXT, "2001:db8:1:2::9"),
+        ("172.18.0.2", "::ffff:198.51.100.7", NEXT, "198.51.100.7"),
+        ("172.18.0.2", "198.51.100.7:4433", NEXT, "198.51.100.7"),
+    ],
+)
+def test_the_exact_address_follows_the_same_trust_rules_as_the_key(peer, header, proxies, expected):
+    request = req(peer, header) if header is not None else req(peer)
+    assert client_address(request, proxies) == expected
+
+
+def test_the_exact_address_is_the_key_for_everything_but_ipv6():
+    for peer in ("203.0.113.9", "::ffff:203.0.113.9", "testclient"):
+        assert client_address(req(peer), ()) == client_ip(req(peer), ())
+
+
+def test_the_exact_address_reads_the_configured_proxies_by_default(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "TRUSTED_PROXIES", NEXT)
+    assert client_address(req("172.18.0.2", "198.51.100.7")) == "198.51.100.7"
