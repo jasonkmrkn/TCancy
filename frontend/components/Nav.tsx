@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CaretDown, List, SignOut, X } from '@phosphor-icons/react';
 import { useAuth, type User } from '@/lib/auth';
 
@@ -124,7 +125,10 @@ function AccountMenu({ user, items, onLogout }: { user: User; items: Item[]; onL
         <button
           role="menuitem"
           tabIndex={open ? 0 : -1}
-          onClick={onLogout}
+          onClick={() => {
+            setOpen(false);
+            onLogout();
+          }}
           className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 ${PUSH}`}
         >
           <SignOut size={16} weight="regular" />
@@ -132,6 +136,66 @@ function AccountMenu({ user, items, onLogout }: { user: User; items: Item[]; onL
         </button>
       </div>
     </div>
+  );
+}
+
+function ConfirmSignOut({ onConfirm, onCancel }: { onConfirm: () => Promise<void>; onCancel: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !busy && onCancel();
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [busy, onCancel]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] grid place-items-center p-4">
+      <div aria-hidden onClick={() => !busy && onCancel()} className="absolute inset-0 bg-zinc-900/40 backdrop-blur-sm" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="signout-title"
+        className="relative w-full max-w-sm rounded-[2rem] border border-zinc-200/60 bg-white p-8 shadow-[0_30px_60px_-20px_rgba(24,24,27,0.3)]"
+      >
+        <span aria-hidden className="grid h-11 w-11 place-items-center rounded-full bg-zinc-100 text-zinc-900">
+          <SignOut size={20} />
+        </span>
+        <h2 id="signout-title" className="mt-5 text-xl font-semibold tracking-tight text-zinc-900">
+          Sign out of TCancy?
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed text-zinc-500">You will need to sign in again to see your account.</p>
+        <div className="mt-7 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className={`inline-flex min-h-11 items-center justify-center rounded-full border border-zinc-200 px-5 text-sm font-medium text-zinc-900 transition duration-300 ${EASE} hover:border-zinc-400 ${PUSH} disabled:opacity-50`}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await onConfirm();
+            }}
+            className={`inline-flex min-h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-zinc-50 transition duration-300 ${EASE} hover:bg-zinc-800 ${PUSH} disabled:opacity-60`}
+          >
+            {busy ? 'Signing out...' : 'Sign out'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -143,6 +207,7 @@ export default function Nav() {
   const { user, loading, logout } = useAuth();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
   const account = loading ? [] : accountMenuFor(user);
 
   useEffect(() => setMobileOpen(false), [pathname]);
@@ -199,7 +264,7 @@ export default function Nav() {
                 </Link>
               </>
             )}
-            {user && <AccountMenu user={user} items={account} onLogout={() => logout()} />}
+            {user && <AccountMenu user={user} items={account} onLogout={() => setConfirmOut(true)} />}
           </div>
 
           {/* Mobile toggle */}
@@ -276,7 +341,10 @@ export default function Nav() {
                     </Link>
                   ))}
                   <button
-                    onClick={() => logout()}
+                    onClick={() => {
+                      setMobileOpen(false);
+                      setConfirmOut(true);
+                    }}
                     tabIndex={mobileOpen ? 0 : -1}
                     className={`mt-1 flex items-center gap-2 py-2 text-left text-sm text-zinc-600 ${PUSH}`}
                   >
@@ -289,6 +357,7 @@ export default function Nav() {
           </div>
         </div>
       </div>
+      {confirmOut && <ConfirmSignOut onConfirm={() => logout()} onCancel={() => setConfirmOut(false)} />}
     </header>
   );
 }
