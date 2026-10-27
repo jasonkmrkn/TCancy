@@ -67,7 +67,11 @@ def schema():
 def clean_tables(schema):
     yield
     for entry in os.listdir(_upload_dir):
-        os.remove(os.path.join(_upload_dir, entry))
+        path = os.path.join(_upload_dir, entry)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
     names = ", ".join(
         '"%s"' % t.name for t in Base.metadata.sorted_tables if t.name != "skills"
     )
