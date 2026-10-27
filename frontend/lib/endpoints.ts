@@ -254,7 +254,6 @@ export const auth = {
     /** Applicant sign-up with profile. Status becomes active immediately. */
     register: (body: RegisterBody) => api<AccountUser>('/auth/register', { method: 'POST', body }),
     /** Alumni sign-up. Account is pending until an admin approves it. */
-    // registerAlumni: (body: LoginBody) => api<AccountUser>('/auth/register/alumni', { method: 'POST', body }),
     registerAlumni: (body: AlumniRegisterBody) => api<AccountUser>('/auth/register/alumni', { method: 'POST', body }),
     login: (body: LoginBody) => api<AccountUser>('/auth/login', { method: 'POST', body }),
     logout: () => api<{ ok: true }>('/auth/logout', { method: 'POST' }),
@@ -354,4 +353,8 @@ export const admin = {
         api<Page<AdminTestimonial>>('/admin/testimonials', { query: q, ...o }),
     moderateTestimonial: (id: string, status: 'approved' | 'hidden') =>
         api<AdminTestimonial>(`/admin/testimonials/${id}`, { method: 'PATCH', body: { status } }),
+    /** Encryption benchmarks. The response shape is not typed by the backend, so it is read as JSON. */
+    benchmarks: (o?: Opts) => api<unknown>('/admin/benchmarks', o),
+    runBenchmark: (body: { sizes: number[]; repeats: number }) =>
+        api<unknown>('/admin/benchmarks/run', { method: 'POST', body }),
 };

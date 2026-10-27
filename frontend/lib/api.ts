@@ -53,6 +53,8 @@ const MESSAGES: Record<string, string> = {
   INVALID_TRANSITION: 'That status change is not allowed.',
   NO_KTP: 'The applicant has not uploaded an ID card.',
   NO_CHANGE: 'Nothing to change.',
+  CONSENT_REQUIRED: 'Please accept all the consent statements to apply.',
+  INVALID_CONSENT: 'One of the consent statements is not valid.',
 };
 
 export function messageFor(code: string, fallback: string): string {
