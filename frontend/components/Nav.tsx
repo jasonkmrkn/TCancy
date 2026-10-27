@@ -36,7 +36,7 @@ export function accountMenuFor(user: User | null): Item[] {
   }
   return [
     { href: '/dashboard', label: 'Dashboard' },
-    { href: '/jobs', label: 'My vacancies' },
+    // { href: '/jobs', label: 'My vacancies' },
     { href: '/admin', label: 'Admin' },
   ];
 }

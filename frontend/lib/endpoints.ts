@@ -46,6 +46,10 @@ export type ApplicantProfileBody = {
 
 export type RegisterBody = LoginBody & { profile: ApplicantProfileBody };
 
+export type AlumniRegisterBody = LoginBody & {
+    profile: { full_name: string; company: string; angkatan: number };
+};
+
 export type AlumniProfileBody = {
     full_name?: string | null;
     company?: string | null;
@@ -250,7 +254,8 @@ export const auth = {
     /** Applicant sign-up with profile. Status becomes active immediately. */
     register: (body: RegisterBody) => api<AccountUser>('/auth/register', { method: 'POST', body }),
     /** Alumni sign-up. Account is pending until an admin approves it. */
-    registerAlumni: (body: LoginBody) => api<AccountUser>('/auth/register/alumni', { method: 'POST', body }),
+    // registerAlumni: (body: LoginBody) => api<AccountUser>('/auth/register/alumni', { method: 'POST', body }),
+    registerAlumni: (body: AlumniRegisterBody) => api<AccountUser>('/auth/register/alumni', { method: 'POST', body }),
     login: (body: LoginBody) => api<AccountUser>('/auth/login', { method: 'POST', body }),
     logout: () => api<{ ok: true }>('/auth/logout', { method: 'POST' }),
     me: (o?: Opts) => api<AccountUser>('/auth/me', o),

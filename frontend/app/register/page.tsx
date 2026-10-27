@@ -26,6 +26,7 @@ const EMPTY = {
   password: '',
   confirm: '',
   full_name: '',
+  company: '',
   email: '',
   phone: '',
   nik: '',
@@ -131,6 +132,16 @@ export default function RegisterPage() {
     if (username.length < 3 || username.length > 64) out.username = 'Username must be 3-64 characters.';
     if (form.password.length < 8 || form.password.length > 256) out.password = 'Password must be 8-256 characters.';
     if (form.confirm !== form.password) out.confirm = 'Passwords do not match.';
+    if (kind === 'alumni') {
+      if (!form.full_name.trim()) out.full_name = 'Full name is required.';
+      else if (form.full_name.trim().length > 200) out.full_name = 'Full name must be at most 200 characters.';
+      if (!form.company.trim()) out.company = 'Company is required.';
+      else if (form.company.trim().length > 200) out.company = 'Company must be at most 200 characters.';
+      const year = Number(form.angkatan);
+      if (!Number.isInteger(year) || year < 1990 || year > THIS_YEAR) {
+        out.angkatan = 'Class year must be between 1990 and ' + THIS_YEAR + '.';
+      }
+    }
     if (kind === 'applicant') {
       if (!form.full_name.trim()) out.full_name = 'Full name is required.';
       else if (form.full_name.trim().length > 200) out.full_name = 'Full name must be at most 200 characters.';
@@ -169,7 +180,15 @@ export default function RegisterPage() {
     const username = form.username.trim().toLowerCase();
     try {
       if (kind === 'alumni') {
-        await authApi.registerAlumni({ username, password: form.password });
+        await authApi.registerAlumni({
+          username,
+          password: form.password,
+          profile: {
+            full_name: form.full_name.trim(),
+            company: form.company.trim(),
+            angkatan: Number(form.angkatan),
+          },
+        });
       } else {
         await authApi.register({
           username,
@@ -295,6 +314,22 @@ export default function RegisterPage() {
           </div>
         </section>
 
+        {kind === 'alumni' && (
+          <section className="rise flex flex-col gap-5" style={stagger(3)}>
+            <h2 className={SECTION}>Alumni details</h2>
+            <FormField label="Full name" error={fields.full_name}>
+              <input className={inputClass} value={form.full_name} onChange={set('full_name')} autoComplete="name" />
+            </FormField>
+            <div className="grid items-start gap-5 sm:grid-cols-2">
+              <FormField label="Company" error={fields.company}>
+                <input className={inputClass} value={form.company} onChange={set('company')} autoComplete="organization" />
+              </FormField>
+              <FormField label="Class year" error={fields.angkatan} hint={`Year of entry, between 1990 and ${THIS_YEAR}.`}>
+                <input className={inputClass} inputMode="numeric" maxLength={4} value={form.angkatan} onChange={set('angkatan')} />
+              </FormField>
+            </div>
+          </section>
+        )}
         {kind === 'applicant' && (
           <section className="rise flex flex-col gap-5" style={stagger(3)}>
             <h2 className={SECTION}>Personal details</h2>
