@@ -24,6 +24,7 @@ export function accountMenuFor(user: User | null): Item[] {
       { href: '/dashboard', label: 'Dashboard' },
       { href: '/applications', label: 'My applications' },
       { href: '/documents', label: 'Documents' },
+      { href: '/testimonials', label: 'Testimonials' },
       { href: '/profile', label: 'Profile' },
     ];
   }
@@ -36,7 +37,6 @@ export function accountMenuFor(user: User | null): Item[] {
   }
   return [
     { href: '/dashboard', label: 'Dashboard' },
-    // { href: '/jobs', label: 'My vacancies' },
     { href: '/admin', label: 'Admin' },
   ];
 }
@@ -89,7 +89,7 @@ function AccountMenu({ user, items, onLogout }: { user: User; items: Item[]; onL
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className={`flex items-center gap-2.5 rounded-full border border-zinc-200 bg-white py-1 pl-1 pr-3 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition duration-300 ${EASE} hover:border-zinc-300 ${PUSH} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600`}
+        className={`flex items-center gap-2.5 rounded-full border border-zinc-200 bg-white py-1 pl-1 pr-3 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition duration-300 ${EASE} hover:border-zinc-300 ${PUSH} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900`}
       >
         <span className="grid h-7 w-7 place-items-center rounded-full bg-zinc-900 text-xs font-medium uppercase text-zinc-50">
           {user.username.slice(0, 1)}
@@ -170,7 +170,7 @@ export default function Nav() {
                   {it.label}
                   <span
                     aria-hidden
-                    className={`absolute inset-x-4 -bottom-[13px] h-0.5 origin-left bg-emerald-600 transition-transform duration-500 ${EASE} ${active ? 'scale-x-100' : 'scale-x-0'
+                    className={`absolute inset-x-4 -bottom-[13px] h-0.5 origin-left bg-zinc-900 transition-transform duration-500 ${EASE} ${active ? 'scale-x-100' : 'scale-x-0'
                       }`}
                   />
                 </Link>
@@ -233,7 +233,7 @@ export default function Nav() {
                         }`}
                     >
                       {it.label}
-                      {active && <span aria-hidden className="h-1.5 w-1.5 rounded-[2px] bg-emerald-600" />}
+                      {active && <span aria-hidden className="h-1.5 w-1.5 rounded-[2px] bg-zinc-900" />}
                     </Link>
                   </li>
                 );
