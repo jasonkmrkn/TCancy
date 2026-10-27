@@ -52,6 +52,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await api('/auth/logout', { method: 'POST' });
     } finally {
       setUser(null);
+      // Full page load: drops every in-memory page state and lands on the home page.
+      window.location.assign('/');
     }
   }, []);
 
