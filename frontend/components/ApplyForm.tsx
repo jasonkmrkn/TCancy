@@ -17,6 +17,8 @@ const CONSENT_LABELS: Record<string, string> = {
     "I agree to share my profile details (name, email, phone, address and skills) with the vacancy owner.",
   cv: "I agree to share my CV with the vacancy owner.",
   video: "I agree to share my intro video with the vacancy owner.",
+  identity:
+    "I agree that the vacancy owner can see my ID number, address, birth date and ID card, but only if my application is accepted, and only for a limited time.",
 };
 
 type Doc = {
@@ -122,6 +124,8 @@ export default function ApplyForm({ jobId }: { jobId: string }) {
   const cvs = (docs ?? []).filter((d) => d.type === "cv");
   const videos = (docs ?? []).filter((d) => d.type === "intro_video");
   const required = video ? ["profile", "cv", "video"] : ["profile", "cv"];
+  // Optional: without it the owner can never open the identity data, even after accepting.
+  const optional = ["identity"];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -136,7 +140,7 @@ export default function ApplyForm({ jobId }: { jobId: string }) {
     if (Object.keys(errs).length) return;
     const body: Record<string, string | string[]> = {
       cv_document_id: cv,
-      consents: required.filter((v) => agreed.includes(v)),
+      consents: [...required, ...optional].filter((v) => agreed.includes(v)),
     };
     if (video) body.intro_video_document_id = video;
     if (note.trim()) body.cover_note = note.trim();
@@ -292,7 +296,7 @@ export default function ApplyForm({ jobId }: { jobId: string }) {
         data-invalid={errors.consents ? "true" : undefined}
       >
         <legend className="mb-1 font-medium text-zinc-900">Consent</legend>
-        {required.map((value) => {
+        {[...required, ...optional].map((value) => {
           const checked = agreed.includes(value);
           return (
             <label
@@ -323,6 +327,9 @@ export default function ApplyForm({ jobId }: { jobId: string }) {
               </span>
               <span className="leading-relaxed text-zinc-700">
                 {CONSENT_LABELS[value]}
+                {optional.includes(value) && (
+                  <span className="ml-1.5 text-zinc-500">(optional)</span>
+                )}
               </span>
             </label>
           );
