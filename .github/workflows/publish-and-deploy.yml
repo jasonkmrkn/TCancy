@@ -1,0 +1,93 @@
+name: Publish and deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Work out the image tag
+        id: meta
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: echo "tag=sha-${SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Build and push the api image
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          OWNER=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/$OWNER/tcancy-api"
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            -t "$IMAGE:latest" -t "$IMAGE:$TAG" backend
+          docker push --all-tags "$IMAGE"
+
+      - name: Build and push the frontend image
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          OWNER=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/$OWNER/tcancy-frontend"
+          docker build \
+            --build-arg API_URL=http://api:8000 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            -t "$IMAGE:latest" -t "$IMAGE:$TAG" frontend
+          docker push --all-tags "$IMAGE"
+
+  deploy:
+    needs: publish
+    runs-on: [self-hosted, tcancy]
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Pull the new images and restart
+        env:
+          IMAGE_TAG: ${{ needs.publish.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # .env production hanya ada di server (bukan di repo), di home user runner.
+          ENV_FILE="$HOME/tcancy/.env"
+          test -f "$ENV_FILE" || { echo "tidak ada $ENV_FILE"; exit 1; }
+          COMPOSE="docker compose --env-file $ENV_FILE -f docker-compose.prod.yml"
+          # IMAGE_TAG dari workflow menimpa IMAGE_TAG di .env: yang jalan persis commit ini.
+          $COMPOSE pull api frontend
+          $COMPOSE up -d --remove-orphans --wait --wait-timeout 300
+          $COMPOSE ps
+          docker image prune -f

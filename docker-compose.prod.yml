@@ -1,0 +1,117 @@
+name: tcancy
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tcancy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?isi POSTGRES_PASSWORD di .env (openssl rand -hex 24)}
+      POSTGRES_DB: ${POSTGRES_DB:-tcancy}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  api:
+    image: ghcr.io/jasonkmrkn/tcancy-api:${IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tcancy}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tcancy}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?isi FRONTEND_ORIGIN di .env (https://tcancy.app)}
+      SESSION_SECRET: ${SESSION_SECRET:?isi SESSION_SECRET di .env (openssl rand -hex 32)}
+      MASTER_KEY: ${MASTER_KEY:?isi MASTER_KEY di .env (openssl rand -base64 32)}
+      BLIND_INDEX_KEY: ${BLIND_INDEX_KEY:?isi BLIND_INDEX_KEY di .env (openssl rand -hex 32)}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      ENCRYPTION_POLICY: ${ENCRYPTION_POLICY:-assignment}
+      INTEGRITY_MODE: ${INTEGRITY_MODE:-off}
+      UPLOAD_DIR: /data/uploads
+      IDENTITY_ACCESS_DAYS: ${IDENTITY_ACCESS_DAYS:-28}
+      DOWNLOAD_LIMIT_PER_HOUR: ${DOWNLOAD_LIMIT_PER_HOUR:-20}
+      ACCESS_REMINDER_DAYS: ${ACCESS_REMINDER_DAYS:-3}
+      REDIS_URL: redis://redis:6379/0
+      TRUSTED_PROXIES: ${TCANCY_SUBNET:-172.31.200.0/24}
+      RATE_REGISTER_LIMIT: ${RATE_REGISTER_LIMIT:-}
+      RATE_REGISTER_WINDOW_SECONDS: ${RATE_REGISTER_WINDOW_SECONDS:-}
+      RATE_LOGIN_IP_LIMIT: ${RATE_LOGIN_IP_LIMIT:-}
+      RATE_LOGIN_IP_WINDOW_SECONDS: ${RATE_LOGIN_IP_WINDOW_SECONDS:-}
+      RATE_LOGIN_USER_LIMIT: ${RATE_LOGIN_USER_LIMIT:-}
+      RATE_LOGIN_USER_WINDOW_SECONDS: ${RATE_LOGIN_USER_WINDOW_SECONDS:-}
+      RATE_DELETE_ACCOUNT_LIMIT: ${RATE_DELETE_ACCOUNT_LIMIT:-}
+      RATE_DELETE_ACCOUNT_WINDOW_SECONDS: ${RATE_DELETE_ACCOUNT_WINDOW_SECONDS:-}
+    volumes:
+      - uploads:/data/uploads
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [internal]
+
+  frontend:
+    image: ghcr.io/jasonkmrkn/tcancy-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ./frontend
+      args:
+        API_URL: http://api:8000
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [internal]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?isi CLOUDFLARE_TUNNEL_TOKEN di .env}
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  internal:
+    ipam:
+      config:
+        - subnet: ${TCANCY_SUBNET:-172.31.200.0/24}
+
+volumes:
+  pgdata:
+  uploads:
