@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import jobs
-from app.models import ApplicantProfile, Application, Job, Testimonial, User
+from app import jobs, profiles
+from app.models import Application, Job, Testimonial, User
 from app.schemas import TestimonialIn
 
 
@@ -53,9 +53,8 @@ def create(db: Session, user: User, data: TestimonialIn) -> dict:
     exists = db.scalar(select(Testimonial.id).where(Testimonial.application_id == app.id))
     if exists is not None:
         raise HTTPException(status_code=409, detail="TESTIMONIAL_EXISTS")
-    profile = db.get(ApplicantProfile, user.id)
     job = db.get(Job, app.job_id)
-    full_name = profile.full_name.strip() if profile else ""
+    full_name = (profiles.display_name(db, user.id) or "").strip()
     testimonial = Testimonial(
         application_id=app.id,
         author_id=user.id,

@@ -1,10 +1,13 @@
+from datetime import datetime
+
 from sqlalchemy import text
 
+from app import config
 from app.db import engine
-from helpers import skill_ids
+from helpers import skill_ids, CONSENTS
 from test_document import upload
 from test_job import as_user, job_body, login, make_user
-from test_owner import apply_as, new_owner
+from test_owner import apply_as, new_owner, setup, window_of
 
 URL = "/api/v1"
 
@@ -45,8 +48,8 @@ def test_matches_score_order_and_filters(client):
     sql("UPDATE jobs SET deadline = current_date - 1 WHERE id = :i", i=expired)
 
     as_user(client, "budi", "applicant")  # profile skills are the first two: a and b
-    cv = upload(client, "cv", "cv.pdf", b"%PDF").json()["id"]
-    r = client.post("%s/jobs/%s/apply" % (URL, applied), json={"cv_document_id": cv})
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
+    r = client.post("%s/jobs/%s/apply" % (URL, applied), json={"cv_document_id": cv, "consents": CONSENTS})
     assert r.status_code == 201
 
     r = client.get(URL + "/me/matches")
@@ -82,8 +85,8 @@ def test_withdrawn_application_still_excluded(client):
     a = skill_ids(1)[0]
     (job,) = alumni_with_jobs(client, [[a]])
     as_user(client, "budi", "applicant")
-    cv = upload(client, "cv", "cv.pdf", b"%PDF").json()["id"]
-    app_id = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv}).json()["id"]
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
+    app_id = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv, "consents": CONSENTS}).json()["id"]
     assert len(client.get(URL + "/me/matches").json()["items"]) == 0
     client.delete("%s/me/applications/%s" % (URL, app_id))
     assert client.get(URL + "/me/matches").json()["items"] == []
@@ -98,6 +101,7 @@ def test_applicant_dashboard_empty(client):
         "documents": {"cv": 0, "ktp": 0, "intro_video": 0},
         "recent_applications": [],
         "matches": [],
+        "identity_windows": [],
     }
 
 
@@ -105,11 +109,11 @@ def test_applicant_dashboard_counts(client):
     a = skill_ids(1)[0]
     jobs = alumni_with_jobs(client, [[a]] * 7)
     as_user(client, "budi", "applicant")
-    cv = upload(client, "cv", "cv.pdf", b"%PDF").json()["id"]
-    upload(client, "ktp", "ktp.png", b"png")
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4").json()["id"]
+    upload(client, "ktp", "ktp.png", b"\x89PNG\r\n\x1a\n")
     app_ids = []
     for job in jobs[:6]:
-        r = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv})
+        r = client.post("%s/jobs/%s/apply" % (URL, job), json={"cv_document_id": cv, "consents": CONSENTS})
         app_ids.append(r.json()["id"])
     client.delete("%s/me/applications/%s" % (URL, app_ids[0]))
     sql("UPDATE applications SET status = 'accepted' WHERE id = :i", i=app_ids[1])
@@ -150,6 +154,7 @@ def test_owner_dashboard_empty_for_admin(client):
         "jobs": {"open": 0, "closed": 0},
         "applications": {"submitted": 0, "shortlisted": 0, "accepted": 0, "rejected": 0, "withdrawn": 0},
         "new_applications": 0,
+        "identity_windows_ending_soon": [],
     }
 
 
@@ -179,3 +184,175 @@ def test_owner_dashboard_counts_only_own_jobs(client):
 
     sql("UPDATE applications SET created_at = now() - interval '10 days'")
     assert client.get(URL + "/owner/dashboard").json()["new_applications"] == 0
+
+
+def accept(client, app_id):
+    r = client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "accepted"})
+    assert r.status_code == 200
+
+
+def applicant_windows(client):
+    r = client.get(URL + "/me/dashboard")
+    assert r.status_code == 200
+    return r.json()["identity_windows"]
+
+
+def test_applicant_dashboard_lists_the_open_identity_window(client):
+    _, _, app_id = setup(client, with_video=False, identity=True)
+    accept(client, app_id)
+    expires_at = window_of(app_id)[1]
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+
+    title = client.get("%s/me/applications/%s" % (URL, app_id)).json()["job"]["title"]
+    (item,) = applicant_windows(client)
+    assert set(item) == {"application_id", "job_title", "expires_at"}
+    assert item["application_id"] == app_id and item["job_title"] == title
+    assert datetime.fromisoformat(item["expires_at"]) == expires_at
+
+
+def test_applicant_identity_windows_only_while_open(client):
+    _, _, app_id = setup(client, with_video=False, identity=True)
+    accept(client, app_id)
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    assert len(applicant_windows(client)) == 1
+
+    sql("UPDATE applications SET status = 'shortlisted' WHERE id = :i", i=app_id)
+    assert applicant_windows(client) == []
+    sql("UPDATE applications SET status = 'accepted' WHERE id = :i", i=app_id)
+    assert len(applicant_windows(client)) == 1
+
+    # the window passes (moved in the database; the clock is never advanced)
+    sql("UPDATE applications SET identity_access_expires_at = now() - interval '1 second' WHERE id = :i", i=app_id)
+    assert applicant_windows(client) == []
+    sql("UPDATE applications SET identity_access_expires_at = now() + interval '1 day' WHERE id = :i", i=app_id)
+    assert len(applicant_windows(client)) == 1
+
+    r = client.patch("%s/me/applications/%s/consents" % (URL, app_id), json={"revoke": ["identity"]})
+    assert r.status_code == 200
+    assert applicant_windows(client) == []
+
+
+def test_applicant_identity_windows_need_the_identity_consent(client):
+    _, _, app_id = setup(client, with_video=False)  # identity was not granted
+    accept(client, app_id)
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    assert applicant_windows(client) == []
+
+
+def test_applicant_identity_windows_are_own_and_soonest_first(client):
+    _, job_a = new_owner(client)
+    _, job_b = new_owner(client)
+    app_sari = apply_as(client, job_a, "sari", with_video=False, identity=True)
+    app_a = apply_as(client, job_a, "budi", with_video=False, identity=True)
+    cv = client.get("%s/me/applications/%s" % (URL, app_a)).json()["cv_document_id"]
+    r = client.post(
+        "%s/jobs/%s/apply" % (URL, job_b),
+        json={"cv_document_id": cv, "consents": CONSENTS + ["identity"]},
+    )
+    assert r.status_code == 201
+    app_b = r.json()["id"]
+
+    for app_id, days in ((app_sari, 1), (app_a, 5), (app_b, 2)):
+        sql(
+            "UPDATE applications SET status = 'accepted', identity_access_expires_at = "
+            "now() + make_interval(days => :d) WHERE id = :i",
+            d=days, i=app_id,
+        )
+    # budi is logged in: his two windows, the nearer one first, and none of sari's
+    assert [w["application_id"] for w in applicant_windows(client)] == [app_b, app_a]
+
+
+def owner_windows(client):
+    r = client.get(URL + "/owner/dashboard")
+    assert r.status_code == 200
+    return r.json()["identity_windows_ending_soon"]
+
+
+def window_in(app_id, hours):
+    """Accepted, with the identity window ending `hours` from now (negative: already over)."""
+    sql(
+        "UPDATE applications SET status = 'accepted', accepted_at = now(), "
+        "identity_access_expires_at = now() + make_interval(hours => :h) WHERE id = :i",
+        h=hours, i=app_id,
+    )
+
+
+def test_owner_dashboard_lists_the_window_ending_soon(client):
+    _, job_id, app_id = setup(client, with_video=False, identity=True)
+    accept(client, app_id)  # the real window is 28 days: not "soon"
+    assert owner_windows(client) == []
+
+    window_in(app_id, 36)
+    title = client.get("%s/applications/%s" % (URL, app_id)).json()["job"]["title"]
+    (item,) = owner_windows(client)
+    assert set(item) == {"application_id", "job_id", "job_title", "expires_at"}
+    assert item["application_id"] == app_id and item["job_id"] == job_id
+    assert item["job_title"] == title
+    assert datetime.fromisoformat(item["expires_at"]) == window_of(app_id)[1]
+
+
+def test_owner_windows_ending_soon_follow_the_rules(client):
+    owner, _, app_id = setup(client, with_video=False, identity=True)
+    window_in(app_id, 24)
+    assert len(owner_windows(client)) == 1
+
+    sql("UPDATE applications SET status = 'shortlisted' WHERE id = :i", i=app_id)
+    assert owner_windows(client) == []  # no longer accepted
+    sql("UPDATE applications SET status = 'accepted' WHERE id = :i", i=app_id)
+
+    # the window passes (moved in the database; the clock is never advanced)
+    window_in(app_id, -1)
+    assert owner_windows(client) == []
+    window_in(app_id, 24 * 4)
+    assert owner_windows(client) == []  # further away than the 3 reminder days
+    window_in(app_id, 24 * 2)
+    assert len(owner_windows(client)) == 1
+
+    client.post(URL + "/auth/logout")
+    login(client, "budi")
+    r = client.patch("%s/me/applications/%s/consents" % (URL, app_id), json={"revoke": ["identity"]})
+    assert r.status_code == 200
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+    assert owner_windows(client) == []  # consent revoked
+
+
+def test_owner_windows_without_the_identity_consent_never_show(client):
+    _, _, app_id = setup(client, with_video=False)  # identity was not granted
+    window_in(app_id, 24)
+    assert owner_windows(client) == []
+
+
+def test_owner_reminder_days_come_from_config(client, monkeypatch):
+    _, _, app_id = setup(client, with_video=False, identity=True)
+    window_in(app_id, 24 * 4)
+    assert owner_windows(client) == []
+    monkeypatch.setattr(config, "ACCESS_REMINDER_DAYS", 5)
+    assert len(owner_windows(client)) == 1
+    monkeypatch.setattr(config, "ACCESS_REMINDER_DAYS", 1)
+    window_in(app_id, 36)
+    assert owner_windows(client) == []
+    window_in(app_id, 12)
+    assert len(owner_windows(client)) == 1
+
+
+def test_owner_windows_are_own_soonest_first_and_anonymous(client):
+    owner, job_id = new_owner(client)
+    _, other_job = new_owner(client)
+    app_late = apply_as(client, job_id, "budi", with_video=False, identity=True)
+    app_soon = apply_as(client, job_id, "andi", with_video=False, identity=True)
+    app_other = apply_as(client, other_job, "sari", with_video=False, identity=True)
+    window_in(app_late, 48)
+    window_in(app_soon, 12)
+    window_in(app_other, 6)
+    client.post(URL + "/auth/logout")
+    login(client, owner)
+
+    r = client.get(URL + "/owner/dashboard")
+    items = r.json()["identity_windows_ending_soon"]
+    assert [i["application_id"] for i in items] == [app_soon, app_late]  # sari's is another owner's
+    for name in ("budi", "andi", "sari"):
+        assert name not in r.text  # ids, titles and dates only

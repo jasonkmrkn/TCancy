@@ -6,13 +6,16 @@ PROFILE = {"full_name": "Sari Alumni", "company": "Acme", "angkatan": 2015}
 
 
 def new_alumni(client, username, profile=True):
-    """Register a pending alumni (optionally with a complete profile), then log out."""
-    r = client.post(URL + "/auth/register/alumni", json={"username": username, "password": "rahasia123"})
+    """Register a pending alumni, then log out. profile=False leaves the profile incomplete."""
+    r = client.post(
+        URL + "/auth/register/alumni",
+        json={"username": username, "password": "rahasia123", "profile": PROFILE},
+    )
     assert r.status_code == 201
     uid = r.json()["id"]
-    if profile:
+    if not profile:
         login(client, username)
-        assert client.put(URL + "/me/profile", json=PROFILE).status_code == 200
+        assert client.put(URL + "/me/profile", json={}).status_code == 200
         client.post(URL + "/auth/logout")
     return uid
 

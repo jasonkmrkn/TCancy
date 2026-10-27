@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import text
 
 from app.db import engine
-from helpers import make_profile, password_hash, skill_ids
+from helpers import make_alumni_profile, make_profile, password_hash, skill_ids
 
 AUTH = "/api/v1/auth"
 
@@ -23,7 +23,10 @@ def login(client, username="budi"):
 
 
 def register_alumni(client, username="alumna"):
-    r = client.post(AUTH + "/register/alumni", json={"username": username, "password": "rahasia123"})
+    r = client.post(
+        AUTH + "/register/alumni",
+        json={"username": username, "password": "rahasia123", "profile": make_alumni_profile()},
+    )
     assert r.status_code == 201
     login(client, username)
 
@@ -198,17 +201,23 @@ def test_alumni_pending_reads_and_updates_profile(client):
     assert r.status_code == 200
     body = r.json()
     assert body["role"] == "alumni"
-    assert body["full_name"] is None
-    assert body["profile_complete"] is False
+    assert body["full_name"] == "Sari Alumni"
+    assert body["profile_complete"] is True
     assert body["verification"]["state"] == "pending"
 
     r = client.put(
-        "/api/v1/me/profile", json={"full_name": "Ani Alumni", "company": "Acme", "angkatan": 2015}
+        "/api/v1/me/profile", json={"full_name": "Ani Alumni", "company": "Globex", "angkatan": 2016}
     )
     assert r.status_code == 200
-    assert r.json()["profile_complete"] is True
+    assert r.json()["full_name"] == "Ani Alumni"
     again = client.get("/api/v1/me/profile").json()
-    assert again["company"] == "Acme" and again["angkatan"] == 2015
+    assert again["company"] == "Globex" and again["angkatan"] == 2016
+
+    # An empty body clears the profile: the name reads back as null and it is incomplete.
+    assert client.put("/api/v1/me/profile", json={}).status_code == 200
+    cleared = client.get("/api/v1/me/profile").json()
+    assert cleared["full_name"] is None
+    assert cleared["profile_complete"] is False
 
 
 def test_alumni_profile_validation(client):

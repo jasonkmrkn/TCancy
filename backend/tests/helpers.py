@@ -18,6 +18,7 @@ def password_hash(password="rahasia123"):
     """
     return security.hash_password(password)
 
+
 def skill_ids(n=2):
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT id FROM skills ORDER BY name LIMIT :n"), {"n": n}).all()
@@ -41,3 +42,25 @@ def make_profile(**over):
     }
     data.update(over)
     return data
+
+
+def make_alumni_profile(**over):
+    """A complete alumni profile, as sent at alumni registration."""
+    data = {"full_name": "Sari Alumni", "company": "Acme", "angkatan": 2015}
+    data.update(over)
+    return data
+
+
+# STUB-RAYNALD
+def login_as(client, username, password="rahasia123"):
+    """Log in and return the headers non-GET requests need (CSRF).
+
+    Frozen interface: the shape is {"X-CSRF-Token": <value of the csrf_token cookie>}.
+    """
+    r = client.post("/api/v1/auth/login", json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+    return {"X-CSRF-Token": client.cookies["csrf_token"]}
+
+
+CONSENTS = ["profile", "cv"]
+CONSENTS_WITH_VIDEO = ["profile", "cv", "video"]

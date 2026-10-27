@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 
 from app.db import engine
+from helpers import CONSENTS, CONSENTS_WITH_VIDEO
 from test_job import as_user, job_body, login, make_user
 from test_document import upload
 
@@ -23,8 +24,8 @@ def make_job(client, **over):
 
 def applicant_with_docs(client, username="budi"):
     as_user(client, username, "applicant")
-    cv = upload(client, "cv", "cv.pdf", b"%PDF cv").json()["id"]
-    video = upload(client, "intro_video", "v.mp4", b"video").json()["id"]
+    cv = upload(client, "cv", "cv.pdf", b"%PDF-1.4 cv").json()["id"]
+    video = upload(client, "intro_video", "v.mp4", b"\x00\x00\x00\x18ftypmp42 video").json()["id"]
     return cv, video
 
 
@@ -33,7 +34,12 @@ def test_apply_success_and_views(client):
     cv, video = applicant_with_docs(client)
     r = client.post(
         "%s/jobs/%s/apply" % (URL, job_id),
-        json={"cv_document_id": cv, "intro_video_document_id": video, "cover_note": "Hi"},
+        json={
+            "cv_document_id": cv,
+            "intro_video_document_id": video,
+            "cover_note": "Hi",
+            "consents": CONSENTS_WITH_VIDEO,
+        },
     )
     assert r.status_code == 201
     body = r.json()
@@ -52,7 +58,10 @@ def test_apply_success_and_views(client):
 def test_apply_without_optional_fields(client):
     job_id = make_job(client)
     cv, _ = applicant_with_docs(client)
-    r = client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": cv})
+    r = client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": cv, "consents": CONSENTS},
+    )
     assert r.status_code == 201
     assert r.json()["intro_video_document_id"] is None and r.json()["cover_note"] is None
 
@@ -62,13 +71,25 @@ def test_apply_validation(client):
     cv, video = applicant_with_docs(client)
     path = "%s/jobs/%s/apply" % (URL, job_id)
     assert client.post(path, json={}).status_code == 422
-    assert client.post(path, json={"cv_document_id": cv, "cover_note": "x" * 2001}).status_code == 422
-    assert client.post(path, json={"cv_document_id": cv, "extra": 1}).status_code == 422
+    assert client.post(
+        path, json={"cv_document_id": cv, "consents": CONSENTS, "cover_note": "x" * 2001}
+    ).status_code == 422
+    assert client.post(
+        path, json={"cv_document_id": cv, "consents": CONSENTS, "extra": 1}
+    ).status_code == 422
     # wrong document type in either slot
-    assert client.post(path, json={"cv_document_id": video}).status_code == 422
-    assert client.post(path, json={"cv_document_id": cv, "intro_video_document_id": cv}).status_code == 422
+    assert client.post(
+        path, json={"cv_document_id": video, "consents": CONSENTS}
+    ).status_code == 422
+    assert client.post(
+        path,
+        json={"cv_document_id": cv, "intro_video_document_id": cv, "consents": CONSENTS_WITH_VIDEO},
+    ).status_code == 422
     # unknown document
-    r = client.post(path, json={"cv_document_id": "00000000-0000-0000-0000-000000000000"})
+    r = client.post(
+        path,
+        json={"cv_document_id": "00000000-0000-0000-0000-000000000000", "consents": CONSENTS},
+    )
     assert r.status_code == 422 and r.json()["detail"] == "invalid document"
     assert client.get(URL + "/me/applications").json() == []
 
@@ -78,13 +99,16 @@ def test_apply_other_users_document_rejected(client):
     other_cv, _ = applicant_with_docs(client, "other")
     client.post(URL + "/auth/logout")
     applicant_with_docs(client, "budi")
-    r = client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": other_cv})
+    r = client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": other_cv, "consents": CONSENTS},
+    )
     assert r.status_code == 422
 
 
 def test_apply_job_errors(client):
     cv, _ = applicant_with_docs(client)
-    body = {"cv_document_id": cv}
+    body = {"cv_document_id": cv, "consents": CONSENTS}
     assert client.post(URL + "/jobs/00000000-0000-0000-0000-000000000000/apply", json=body).status_code == 404
     r = client.post(URL + "/jobs/not-a-uuid/apply", json=body)
     assert r.status_code == 404 and r.json()["detail"] == "JOB_NOT_FOUND"
@@ -108,20 +132,25 @@ def test_apply_job_errors(client):
 def test_deadline_today_is_allowed(client):
     job_id = make_job(client, deadline=date.today().isoformat())
     cv, _ = applicant_with_docs(client)
-    assert client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": cv}).status_code == 201
+    r = client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": cv, "consents": CONSENTS},
+    )
+    assert r.status_code == 201
 
 
 def test_already_applied(client):
     job_id = make_job(client)
     cv, _ = applicant_with_docs(client)
     path = "%s/jobs/%s/apply" % (URL, job_id)
-    assert client.post(path, json={"cv_document_id": cv}).status_code == 201
-    r = client.post(path, json={"cv_document_id": cv})
+    body = {"cv_document_id": cv, "consents": CONSENTS}
+    assert client.post(path, json=body).status_code == 201
+    r = client.post(path, json=body)
     assert r.status_code == 409 and r.json()["detail"] == "ALREADY_APPLIED"
     # also after withdrawing: one application per job per applicant
     app_id = client.get(URL + "/me/applications").json()[0]["id"]
     client.delete("%s/me/applications/%s" % (URL, app_id))
-    assert client.post(path, json={"cv_document_id": cv}).status_code == 409
+    assert client.post(path, json=body).status_code == 409
 
 
 def test_roles_and_auth(client):
@@ -142,7 +171,10 @@ def test_roles_and_auth(client):
 def test_other_users_application_is_404(client):
     job_id = make_job(client)
     cv, _ = applicant_with_docs(client, "budi")
-    app_id = client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": cv}).json()["id"]
+    app_id = client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": cv, "consents": CONSENTS},
+    ).json()["id"]
     client.post(URL + "/auth/logout")
     as_user(client, "siti", "applicant")
     for r in (
@@ -157,7 +189,10 @@ def test_other_users_application_is_404(client):
 def test_withdraw_records_history_and_is_final(client):
     job_id = make_job(client)
     cv, _ = applicant_with_docs(client)
-    app_id = client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": cv}).json()["id"]
+    app_id = client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": cv, "consents": CONSENTS},
+    ).json()["id"]
     r = client.delete("%s/me/applications/%s" % (URL, app_id))
     assert r.status_code == 200 and r.json()["status"] == "withdrawn"
     hist = r.json()["history"]
@@ -171,7 +206,10 @@ def test_withdraw_records_history_and_is_final(client):
 def test_withdraw_rejected_is_invalid(client):
     job_id = make_job(client)
     cv, _ = applicant_with_docs(client)
-    app_id = client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": cv}).json()["id"]
+    app_id = client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": cv, "consents": CONSENTS},
+    ).json()["id"]
     with engine.begin() as conn:
         conn.execute(text("UPDATE applications SET status = 'rejected'"))
     r = client.delete("%s/me/applications/%s" % (URL, app_id))
@@ -181,7 +219,10 @@ def test_withdraw_rejected_is_invalid(client):
 def test_withdraw_shortlisted_allowed(client):
     job_id = make_job(client)
     cv, _ = applicant_with_docs(client)
-    app_id = client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": cv}).json()["id"]
+    app_id = client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": cv, "consents": CONSENTS},
+    ).json()["id"]
     with engine.begin() as conn:
         conn.execute(text("UPDATE applications SET status = 'shortlisted'"))
     r = client.delete("%s/me/applications/%s" % (URL, app_id))
@@ -194,7 +235,11 @@ def test_document_in_use_until_application_is_inactive(client):
     cv, video = applicant_with_docs(client)
     app_id = client.post(
         "%s/jobs/%s/apply" % (URL, job_id),
-        json={"cv_document_id": cv, "intro_video_document_id": video},
+        json={
+            "cv_document_id": cv,
+            "intro_video_document_id": video,
+            "consents": CONSENTS_WITH_VIDEO,
+        },
     ).json()["id"]
     for doc in (cv, video):
         r = client.delete("%s/me/documents/%s" % (URL, doc))
@@ -211,7 +256,10 @@ def test_document_in_use_until_application_is_inactive(client):
 def test_deleting_account_removes_applications(client):
     job_id = make_job(client)
     cv, _ = applicant_with_docs(client)
-    client.post("%s/jobs/%s/apply" % (URL, job_id), json={"cv_document_id": cv})
+    client.post(
+        "%s/jobs/%s/apply" % (URL, job_id),
+        json={"cv_document_id": cv, "consents": CONSENTS},
+    )
     r = client.request("DELETE", URL + "/me/account", json={"password": "rahasia123"})
     assert r.status_code == 200
     with engine.connect() as conn:
@@ -224,6 +272,10 @@ def test_list_is_newest_first(client):
     j2 = make_job(client, title="Second")
     cv, _ = applicant_with_docs(client)
     for j in (j1, j2):
-        assert client.post("%s/jobs/%s/apply" % (URL, j), json={"cv_document_id": cv}).status_code == 201
+        r = client.post(
+            "%s/jobs/%s/apply" % (URL, j),
+            json={"cv_document_id": cv, "consents": CONSENTS},
+        )
+        assert r.status_code == 201
     titles = [a["job"]["title"] for a in client.get(URL + "/me/applications").json()]
     assert titles == ["Second", "First"]

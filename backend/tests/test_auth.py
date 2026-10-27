@@ -8,7 +8,7 @@ from app.db import SessionLocal, engine
 from app.deps import require_role
 from app.main import app
 from app.models import RefreshToken, User
-from helpers import make_profile
+from helpers import make_alumni_profile, make_profile
 
 BASE = "/api/v1/auth"
 
@@ -67,7 +67,10 @@ def test_register_validation(client, username, password):
 
 
 def test_register_alumni_pending(client):
-    r = client.post(BASE + "/register/alumni", json={"username": "alum", "password": "rahasia123"})
+    r = client.post(
+        BASE + "/register/alumni",
+        json={"username": "alum", "password": "rahasia123", "profile": make_alumni_profile()},
+    )
     assert r.status_code == 201
     assert r.json()["role"] == "alumni"
     assert r.json()["status"] == "pending"
@@ -152,7 +155,10 @@ def test_bogus_token(client):
 
 
 def test_wrong_role_forbidden(client):
-    client.post(BASE + "/register/alumni", json={"username": "alum", "password": "rahasia123"})
+    client.post(
+        BASE + "/register/alumni",
+        json={"username": "alum", "password": "rahasia123", "profile": make_alumni_profile()},
+    )
     login(client, "alum")
     r = client.get("/_test/applicant")
     assert r.status_code == 403
@@ -160,7 +166,10 @@ def test_wrong_role_forbidden(client):
 
 
 def test_pending_status(client):
-    client.post(BASE + "/register/alumni", json={"username": "alum", "password": "rahasia123"})
+    client.post(
+        BASE + "/register/alumni",
+        json={"username": "alum", "password": "rahasia123", "profile": make_alumni_profile()},
+    )
     login(client, "alum")
     assert client.get(BASE + "/me").status_code == 200
     assert client.get("/_test/alumni_pending_ok").status_code == 200

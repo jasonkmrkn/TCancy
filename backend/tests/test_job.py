@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 
 from app.db import engine
-from helpers import make_profile, skill_ids
+from helpers import make_alumni_profile, make_profile, skill_ids
 
 AUTH = "/api/v1/auth"
 URL = "/api/v1/jobs"
@@ -18,7 +18,8 @@ def make_user(client, username, role, status="active"):
         )
     else:
         r = client.post(
-            AUTH + "/register/alumni", json={"username": username, "password": "rahasia123"}
+            AUTH + "/register/alumni",
+            json={"username": username, "password": "rahasia123", "profile": make_alumni_profile()},
         )
     assert r.status_code == 201
     with engine.begin() as conn:

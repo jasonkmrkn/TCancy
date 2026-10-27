@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import profiles
+from app import auditing, profiles
 from app.db import get_db
 from app.deps import require_role
 from app.models import Skill, User
@@ -36,34 +36,37 @@ def get_profile(
     user: User = Depends(require_role("applicant", "alumni", allow_pending=True)),
     db: Session = Depends(get_db),
 ):
-    if user.role == "alumni":
-        out = profiles.alumni_profile_out(db, user)
-        db.commit()
-        return out
-    return profiles.applicant_profile_out(db, user)
+    out = profiles.read(db, user)
+    db.commit()  # reading an alumni profile may create its row
+    return out
 
 
 @router.put("/me/profile")
 def put_profile(
+    request: Request,
     body: dict = Body(...),
     user: User = Depends(require_role("applicant", "alumni", allow_pending=True)),
     db: Session = Depends(get_db),
 ):
     if user.role == "alumni":
         data = _parse(AlumniProfileIn, body)
-        profiles.replace_alumni_profile(db, user, data)
-        db.commit()
-        return profiles.alumni_profile_out(db, user)
-
-    if user.status != "active":
-        raise HTTPException(status_code=403, detail="ACCOUNT_PENDING")
-    data = _parse(ApplicantProfileIn, body)
-    profiles.check_skills(db, data.skill_ids)
-    profiles.check_unique(db, data, user.id)
-    profiles.replace_applicant_profile(db, user, data)
+    else:
+        if user.status != "active":
+            raise HTTPException(status_code=403, detail="ACCOUNT_PENDING")
+        data = _parse(ApplicantProfileIn, body)
     try:
+        out = profiles.update(db, user, data)
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="EMAIL_TAKEN")
-    return profiles.applicant_profile_out(db, user)
+        code = profiles.conflict_code(exc)
+        if code is None:
+            raise
+        raise HTTPException(status_code=409, detail=code) from None
+    except Exception:
+        db.rollback()
+        raise
+    # Only the names of the fields that were sent, never their values.
+    auditing.log(db, request, user, "profile.update", "user", user.id,
+                 {"fields": sorted(data.model_dump(exclude_unset=True))})
+    return out

@@ -11,6 +11,7 @@ from app.models import RefreshToken, User
 
 ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
+CSRF_COOKIE = "csrf_token"
 # The refresh cookie is only sent to the auth endpoints, never to the rest of the API.
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
@@ -20,6 +21,13 @@ log = logging.getLogger("tcancy.auth")
 class InvalidRefreshToken(Exception):
     """Missing, unknown, expired or replayed refresh token. The caller must log in again."""
 
+class RefreshTokenReused(InvalidRefreshToken):
+    """A refresh token that was already used came back: its whole family has been revoked."""
+
+    def __init__(self, user_id: uuid.UUID, family_id: uuid.UUID, revoked: int):
+        super().__init__()
+        self.user_id, self.family_id, self.revoked = user_id, family_id, revoked
+
 class SuspendedAccount(Exception):
     """The refresh token is fine but the account has been suspended since."""
 
@@ -28,7 +36,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str, csrf_token: str ) -> None:
     common = dict(httponly=True, secure=config.COOKIE_SECURE, samesite="lax")
     response.set_cookie(
         ACCESS_COOKIE, access_token, max_age=config.ACCESS_TOKEN_MINUTES * 60, path="/", **common
@@ -40,12 +48,22 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
         path=REFRESH_COOKIE_PATH,
         **common,
     )
+    response.set_cookie(
+        CSRF_COOKIE,
+        csrf_token,
+        max_age=config.REFRESH_TOKEN_DAYS * 24 * 3600,
+        path="/",
+        httponly=False,
+        secure=config.COOKIE_SECURE,
+        samesite="lax",
+    )
 
 
 def clear_auth_cookies(response: Response) -> None:
     common = dict(httponly=True, secure=config.COOKIE_SECURE, samesite="lax")
     response.delete_cookie(ACCESS_COOKIE, path="/", **common)
     response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH, **common)
+    response.delete_cookie(CSRF_COOKIE, path="/", httponly=False, secure=config.COOKIE_SECURE, samesite="lax")
 
 
 def _new_refresh_row(user_id: uuid.UUID, family_id: uuid.UUID, now: datetime):
@@ -59,12 +77,13 @@ def _new_refresh_row(user_id: uuid.UUID, family_id: uuid.UUID, now: datetime):
     return row, raw
 
 
-def _revoke_family(db: Session, family_id: uuid.UUID, now: datetime) -> None:
-    db.execute(
+def _revoke_family(db: Session, family_id: uuid.UUID, now: datetime) -> int:
+    """Revoke the live tokens of a family; returns how many there were."""
+    return db.execute(
         update(RefreshToken)
         .where(RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=now)
-    )
+    ).rowcount
 
 
 def start_session(db: Session, user: User) -> tuple[str, str]:
@@ -77,11 +96,12 @@ def start_session(db: Session, user: User) -> tuple[str, str]:
     return access, refresh
 
 
-def _replayed(db: Session, row: RefreshToken, now: datetime) -> InvalidRefreshToken:
-    _revoke_family(db, row.family_id, now)
+def _replayed(db: Session, row: RefreshToken, now: datetime) -> RefreshTokenReused:
+    user_id, family_id = row.user_id, row.family_id
+    revoked = _revoke_family(db, family_id, now)
     db.commit()
-    log.warning("refresh token reuse: revoked family %s of user %s", row.family_id, row.user_id)
-    return InvalidRefreshToken()
+    log.warning("refresh token reuse: revoked family %s of user %s", family_id, user_id)
+    return RefreshTokenReused(user_id, family_id, revoked)
 
 
 def rotate_refresh_token(db: Session, raw_token: str | None) -> tuple[User, str, str]:
@@ -120,12 +140,17 @@ def rotate_refresh_token(db: Session, raw_token: str | None) -> tuple[User, str,
     return user, access, next_raw
 
 
-def end_session(db: Session, raw_token: str | None) -> None:
+def end_session(db: Session, raw_token: str | None) -> uuid.UUID | None:
+    """Revoke the session this refresh token belongs to; returns whose session it was,
+    or None when there was no live session to end."""
     if not raw_token:
-        return
+        return None
     row = db.scalar(
         select(RefreshToken).where(RefreshToken.token_hash == tokens.hash_refresh_token(raw_token))
     )
-    if row is not None:
-        _revoke_family(db, row.family_id, _now())
-        db.commit()
+    if row is None:
+        return None
+    user_id = row.user_id
+    revoked = _revoke_family(db, row.family_id, _now())
+    db.commit()
+    return user_id if revoked else None

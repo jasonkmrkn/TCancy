@@ -2,20 +2,26 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    DDL,
     BigInteger,
     Boolean,
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
+    Integer,
+    LargeBinary,
     SmallInteger,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 ROLES = ("applicant", "alumni", "admin")
@@ -41,6 +47,7 @@ class User(Base):
         Enum(*STATUSES, name="user_status"), nullable=False, server_default="active"
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_blind_index: Mapped[bytes | None] = mapped_column(LargeBinary, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -71,12 +78,7 @@ class ApplicantProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    full_name: Mapped[str] = mapped_column(Text, nullable=False)
-    email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    phone: Mapped[str] = mapped_column(Text, nullable=False)
-    nik: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    address: Mapped[str] = mapped_column(Text, nullable=False)
-    birth_date: Mapped[date] = mapped_column(Date, nullable=False)
+    nik_blind_index: Mapped[bytes | None] = mapped_column(LargeBinary, unique=True)
     angkatan: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     preferred_type: Mapped[str | None] = mapped_column(Text)
     preferred_location: Mapped[str | None] = mapped_column(Text)
@@ -94,7 +96,6 @@ class AlumniProfile(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    full_name: Mapped[str | None] = mapped_column(Text)
     company: Mapped[str | None] = mapped_column(Text)
     angkatan: Mapped[int | None] = mapped_column(SmallInteger)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -147,7 +148,6 @@ class Document(Base):
     type: Mapped[str] = mapped_column(Text, nullable=False)
     ext: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -218,6 +218,8 @@ class Application(Base):
     cover_note: Mapped[str | None] = mapped_column(Text)
     cv_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     intro_video_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    identity_access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -268,6 +270,162 @@ class Testimonial(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     moderated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ApplicationConsent(Base):
+    __tablename__ = "application_consents"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id", "scope", name="uq_application_consents_application_scope"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False
+    )
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_actor_id_created_at", "actor_id", "created_at"),
+        Index("ix_audit_logs_target_id_created_at", "target_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    actor_role: Mapped[str | None] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    target_type: Mapped[str | None] = mapped_column(Text)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    ip: Mapped[str | None] = mapped_column(Text)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+Index("ix_audit_logs_created_at_id", AuditLog.__table__.c.created_at.desc(), AuditLog.__table__.c.id.desc())
+
+AUDIT_APPEND_ONLY_SQL = (
+    """CREATE OR REPLACE FUNCTION audit_logs_reject_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_logs is append-only, UPDATE and DELETE are not allowed'
+        USING ERRCODE = 'restrict_violation';
+END;
+$$""",
+    """CREATE TRIGGER audit_logs_append_only BEFORE UPDATE OR DELETE ON audit_logs
+FOR EACH STATEMENT EXECUTE FUNCTION audit_logs_reject_change()""",
+    "ALTER TABLE audit_logs ENABLE ALWAYS TRIGGER audit_logs_append_only",
+)
+for _statement in AUDIT_APPEND_ONLY_SQL:
+    event.listen(AuditLog.__table__, "after_create", DDL(_statement))
+
+class EncryptedField(Base):
+    __tablename__ = "encrypted_fields"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "field_name", "algorithm", name="uq_encrypted_fields_user_field_algorithm"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm: Mapped[str] = mapped_column(Text, nullable=False)
+    salt: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # HMAC tag of the ciphertext (app.integrity); a field is one chunk, so it lives on the row.
+    tag: Mapped[bytes | None] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DocumentCopy(Base):
+    __tablename__ = "document_copies"
+    __table_args__ = (
+        UniqueConstraint("document_id", "algorithm", name="uq_document_copies_document_algorithm"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    algorithm: Mapped[str] = mapped_column(Text, nullable=False)
+    salt: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    storage_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("4194304"))
+    ciphertext_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CryptoBenchmark(Base):
+    __tablename__ = "crypto_benchmarks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL")
+    )
+    algorithm: Mapped[str] = mapped_column(Text, nullable=False)
+    operation: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    crypto_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    integrity_ms: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
+    total_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    run_no: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrityTag(Base):
+    __tablename__ = "integrity_tags"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_copy_id", "chunk_index", name="uq_integrity_tags_copy_chunk"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    document_copy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("document_copies.id", ondelete="CASCADE"), nullable=False
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    tag: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
