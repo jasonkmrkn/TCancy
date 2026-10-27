@@ -9,3 +9,4 @@ __pycache__/
 backend/uploads/
 .env
 backend/.env
+.ruff_cache/
