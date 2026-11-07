@@ -118,7 +118,6 @@ def run_synthetic(db: Session, user: User, sizes: list[int], repeats: int) -> di
     if total_bytes > ADMIN_MAX_BYTES:
         raise HTTPException(status_code=422, detail="BENCHMARK_TOO_LARGE")
     _check_rate("admin_benchmark", user.id, ADMIN_LIMIT)
-    # ponytail: two runs at the same moment can get the same run_no; use a sequence if that matters.
     run_no = (db.scalar(select(func.max(CryptoBenchmark.run_no)).where(CryptoBenchmark.source == "benchmark")) or 0) + 1
     item = "benchmark:%d" % run_no
     check = vault.integrity_enabled()
