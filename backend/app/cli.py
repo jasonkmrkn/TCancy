@@ -33,11 +33,23 @@ def create_admin(username: str, password: str) -> User:
         return user
 
 
+def purge_expired_proofs() -> int:
+    """Expire verification requests past their 14 days; returns how many expired."""
+    from app import proof_purge
+
+    with SessionLocal() as db:
+        return proof_purge.purge_expired(db)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="TCancy admin tools")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("create-admin", help="create an admin account (password is asked by prompt)")
     p.add_argument("--username", help="admin username (asked by prompt if omitted)")
+    sub.add_parser(
+        "purge-expired-proofs",
+        help="expire verification requests older than 14 days and delete their proofs and packages",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "create-admin":
@@ -52,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         print(f"Admin '{user.username}' created.")
+    elif args.command == "purge-expired-proofs":
+        count = purge_expired_proofs()
+        print(f"Expired {count} verification request(s).")
     return 0
 
 
