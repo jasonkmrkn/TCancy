@@ -5,9 +5,25 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app import jobs, vault
-from app.models import ROLES, STATUSES, AlumniProfile, Application, Document, Job, User
-from app.profiles import alumni_profile_complete, alumni_verification, display_name, get_alumni_profile
+from app import jobs, proof_purge, vault
+from app.models import (
+    ROLES,
+    STATUSES,
+    AlumniProfile,
+    Application,
+    Document,
+    Job,
+    ProofGrant,
+    User,
+    VerificationProof,
+    VerificationRequest,
+)
+from app.profiles import (
+    alumni_profile_complete,
+    alumni_verification,
+    display_name,
+    get_alumni_profile,
+)
 
 APPLICATION_STATUSES = ("submitted", "shortlisted", "accepted", "rejected", "withdrawn")
 JOB_STATUSES = ("open", "closed")
@@ -35,7 +51,10 @@ def _after_cursor(query, cursor: str | None):
         return query
     created_at, ident = jobs.decode_cursor(cursor)
     return query.where(
-        or_(User.created_at < created_at, (User.created_at == created_at) & (User.id < ident))
+        or_(
+            User.created_at < created_at,
+            (User.created_at == created_at) & (User.id < ident),
+        )
     )
 
 
@@ -80,7 +99,31 @@ def list_alumni(db: Session, state: str | None, limit: int, cursor: str | None) 
 
 
 def _account_out(user: User) -> dict:
-    return {"id": str(user.id), "username": user.username, "role": user.role, "status": user.status}
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "role": user.role,
+        "status": user.status,
+    }
+
+
+# app/admin.py, above approve_alumni
+def _opened_by(db: Session, admin_id: uuid.UUID, alumni_id: uuid.UUID) -> bool:
+    """Whether this admin downloaded the package of a grant this alumni gave them."""
+    return (
+        db.scalar(
+            select(ProofGrant.id)
+            .join(VerificationRequest, VerificationRequest.id == ProofGrant.request_id)
+            .where(
+                VerificationRequest.alumni_id == alumni_id,
+                VerificationRequest.admin_id == admin_id,
+                VerificationRequest.status == "granted",
+                ProofGrant.opened_at.is_not(None),
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def approve_alumni(db: Session, admin: User, user_id: str) -> dict:
@@ -92,23 +135,36 @@ def approve_alumni(db: Session, admin: User, user_id: str) -> dict:
         raise HTTPException(status_code=409, detail="ALREADY_APPROVED")
     if not alumni_profile_complete(profile, display_name(db, user.id)):
         raise HTTPException(status_code=409, detail="PROFILE_INCOMPLETE")
+    if not _opened_by(db, admin.id, user.id):
+        raise HTTPException(status_code=409, detail="PROOF_NOT_REVIEWED")
+    proof = db.scalar(
+        select(VerificationProof).where(VerificationProof.alumni_id == user.id)
+    )
+    profile.proof_sha256 = proof.sha256
+    files = proof_purge.purge_for_alumni(db, user.id, "approved")
     user.status = "active"
     profile.verified_at = datetime.now(timezone.utc)
     profile.verified_by = admin.id
     profile.rejected_at = None
     profile.rejection_reason = None
     db.commit()
+    proof_purge.delete_files(files)
     return _account_out(user)
 
 
 def reject_alumni(db: Session, user_id: str, reason: str) -> dict:
     user = _alumni_or_404(db, user_id)
     profile = get_alumni_profile(db, user.id)
-    if user.status != "pending" or alumni_verification(user, profile)["state"] != "pending":
+    if (
+        user.status != "pending"
+        or alumni_verification(user, profile)["state"] != "pending"
+    ):
         raise HTTPException(status_code=409, detail="NOT_PENDING")
+    files = proof_purge.purge_for_alumni(db, user.id, "rejected")
     profile.rejected_at = datetime.now(timezone.utc)
     profile.rejection_reason = reason
     db.commit()
+    proof_purge.delete_files(files)
     return _account_out(user)
 
 
@@ -124,7 +180,12 @@ def _user_view(user: User) -> dict:
 
 
 def list_users(
-    db: Session, role: str | None, status: str | None, q: str | None, limit: int, cursor: str | None
+    db: Session,
+    role: str | None,
+    status: str | None,
+    q: str | None,
+    limit: int,
+    cursor: str | None,
 ) -> dict:
     query = select(User)
     if role:
@@ -135,7 +196,11 @@ def list_users(
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         query = query.where(User.username.ilike("%" + escaped + "%", escape="\\"))
     query = _after_cursor(query, cursor)
-    rows = list(db.scalars(query.order_by(User.created_at.desc(), User.id.desc()).limit(limit + 1)))
+    rows = list(
+        db.scalars(
+            query.order_by(User.created_at.desc(), User.id.desc()).limit(limit + 1)
+        )
+    )
     page = rows[:limit]
     next_cursor = jobs.encode_cursor(page[-1]) if len(rows) > limit else None
     return {"items": [_user_view(u) for u in page], "next_cursor": next_cursor}

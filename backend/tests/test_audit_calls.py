@@ -11,7 +11,7 @@ import pytest
 
 from app import audit, config
 from helpers import CONSENTS_WITH_VIDEO, make_profile
-from test_admin import admin_login, new_alumni
+from test_admin import admin_login, new_alumni, reviewed
 from test_job import as_user, job_body, login, make_user
 from test_owner import apply_as, new_owner, setup
 from test_testimonial import accepted_app
@@ -20,7 +20,14 @@ from test_testimonial import post as post_testimonial
 URL = "/api/v1"
 
 # Values that must never appear in an audit entry.
-PERSONAL = ("Budi Santoso", "example.com", "Jl. Keputih", "+628123456789", "rahasia123", "secret reason")
+PERSONAL = (
+    "Budi Santoso",
+    "example.com",
+    "Jl. Keputih",
+    "+628123456789",
+    "rahasia123",
+    "secret reason",
+)
 
 
 @pytest.fixture
@@ -40,7 +47,10 @@ def named(calls, action):
 
 def one(calls, action):
     found = named(calls, action)
-    assert len(found) == 1, "expected one %s, got %s" % (action, [c["action"] for c in calls])
+    assert len(found) == 1, "expected one %s, got %s" % (
+        action,
+        [c["action"] for c in calls],
+    )
     return found[0]
 
 
@@ -71,7 +81,10 @@ def test_apply_withdraw_and_revoke_are_logged(client, calls):
     assert c["details"] == {"consents": len(CONSENTS_WITH_VIDEO), "video": True}
 
     calls.clear()
-    r = client.patch("%s/me/applications/%s/consents" % (URL, app_id), json={"revoke": ["video", "cv", "video"]})
+    r = client.patch(
+        "%s/me/applications/%s/consents" % (URL, app_id),
+        json={"revoke": ["video", "cv", "video"]},
+    )
     assert r.status_code == 200
     c = one(calls, "application.consent_revoke")
     assert c["target_id"] == app_id and c["details"] == {"scopes": ["cv", "video"]}
@@ -79,7 +92,11 @@ def test_apply_withdraw_and_revoke_are_logged(client, calls):
     calls.clear()
     assert client.delete("%s/me/applications/%s" % (URL, app_id)).status_code == 200
     c = one(calls, "application.withdraw")
-    assert c["target_type"] == "application" and c["target_id"] == app_id and c["details"] is None
+    assert (
+        c["target_type"] == "application"
+        and c["target_id"] == app_id
+        and c["details"] is None
+    )
     assert_no_personal_values(calls)
 
 
@@ -97,10 +114,16 @@ def test_owner_actions_are_logged(client, calls):
 
     assert client.get("%s/jobs/%s/applications" % (URL, job_id)).status_code == 200
     c = one(calls, "owner.view_applicants")
-    assert c["actor_role"] == "alumni" and c["target_type"] == "job" and c["target_id"] == job_id
+    assert (
+        c["actor_role"] == "alumni"
+        and c["target_type"] == "job"
+        and c["target_id"] == job_id
+    )
     assert c["details"] == {"count": 1}
 
-    r = client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "shortlisted"})
+    r = client.patch(
+        "%s/applications/%s/status" % (URL, app_id), json={"status": "shortlisted"}
+    )
     assert r.status_code == 200
     c = one(calls, "application.status_change")
     assert c["target_id"] == app_id and c["details"] == {"to": "shortlisted"}
@@ -115,7 +138,12 @@ def test_owner_actions_are_logged(client, calls):
 
 def test_identity_view_is_logged_when_it_opens(client, calls):
     owner, job_id, app_id = setup(client, identity=True)
-    assert client.patch("%s/applications/%s/status" % (URL, app_id), json={"status": "accepted"}).status_code == 200
+    assert (
+        client.patch(
+            "%s/applications/%s/status" % (URL, app_id), json={"status": "accepted"}
+        ).status_code
+        == 200
+    )
     calls.clear()
     assert client.get("%s/applications/%s/identity" % (URL, app_id)).status_code == 200
     assert one(calls, "owner.view_identity")["target_id"] == app_id
@@ -135,7 +163,10 @@ def test_refused_identity_access_is_logged(client, calls, suffix, action, reason
     calls.clear()
     assert client.get("%s/applications/%s%s" % (URL, app_id, suffix)).status_code == 403
     c = one(calls, "owner.access_denied")
-    assert c["target_id"] == app_id and c["details"] == {"action": action, "reason": reason}
+    assert c["target_id"] == app_id and c["details"] == {
+        "action": action,
+        "reason": reason,
+    }
     assert named(calls, action) == []  # a refusal is not recorded as a success
 
 
@@ -165,7 +196,10 @@ def test_another_owners_application_leaves_no_owner_entry(client, calls):
     login(client, other)
     calls.clear()
     for suffix in ("/cv", "/video", "/identity", "/identity/ktp"):
-        assert client.get("%s/applications/%s%s" % (URL, app_id, suffix)).status_code == 404
+        assert (
+            client.get("%s/applications/%s%s" % (URL, app_id, suffix)).status_code
+            == 404
+        )
     assert [c for c in calls if c["action"].startswith("owner.")] == []
 
 
@@ -174,9 +208,18 @@ def test_job_actions_are_logged(client, calls):
     calls.clear()
     job_id = client.post(URL + "/jobs", json=job_body()).json()["id"]
     c = one(calls, "job.create")
-    assert c["actor_role"] == "alumni" and c["target_type"] == "job" and c["target_id"] == job_id
+    assert (
+        c["actor_role"] == "alumni"
+        and c["target_type"] == "job"
+        and c["target_id"] == job_id
+    )
 
-    assert client.put("%s/jobs/%s" % (URL, job_id), json=job_body(title="Other title")).status_code == 200
+    assert (
+        client.put(
+            "%s/jobs/%s" % (URL, job_id), json=job_body(title="Other title")
+        ).status_code
+        == 200
+    )
     assert one(calls, "job.update")["target_id"] == job_id
     assert client.post("%s/jobs/%s/close" % (URL, job_id)).status_code == 200
     assert one(calls, "job.close")["target_id"] == job_id
@@ -189,7 +232,11 @@ def test_testimonial_actions_are_logged(client, calls):
     assert r.status_code == 201
     t_id = r.json()["id"]
     c = one(calls, "testimonial.create")
-    assert c["target_type"] == "testimonial" and c["target_id"] == t_id and c["details"] is None
+    assert (
+        c["target_type"] == "testimonial"
+        and c["target_id"] == t_id
+        and c["details"] is None
+    )
 
     assert client.delete("%s/testimonials/%s" % (URL, t_id)).status_code == 204
     assert one(calls, "testimonial.delete")["target_id"] == t_id
@@ -202,10 +249,16 @@ def test_testimonial_moderation_is_logged(client, calls):
     client.post(URL + "/auth/logout")
     admin_login(client)
     calls.clear()
-    r = client.patch("%s/admin/testimonials/%s" % (URL, t_id), json={"status": "approved"})
+    r = client.patch(
+        "%s/admin/testimonials/%s" % (URL, t_id), json={"status": "approved"}
+    )
     assert r.status_code == 200
     c = one(calls, "admin.testimonial_moderate")
-    assert c["actor_role"] == "admin" and c["target_id"] == t_id and c["details"] == {"status": "approved"}
+    assert (
+        c["actor_role"] == "admin"
+        and c["target_id"] == t_id
+        and c["details"] == {"status": "approved"}
+    )
 
 
 def test_admin_account_actions_are_logged(client, calls):
@@ -213,18 +266,32 @@ def test_admin_account_actions_are_logged(client, calls):
     rejected = new_alumni(client, "alum2")
     applicant_id = make_user(client, "pel", "applicant")
     admin_login(client)
+    reviewed(approved)
     calls.clear()
 
-    assert client.post("%s/admin/alumni/%s/approve" % (URL, approved)).status_code == 200
+    assert (
+        client.post("%s/admin/alumni/%s/approve" % (URL, approved)).status_code == 200
+    )
     c = one(calls, "admin.alumni_approve")
-    assert c["actor_role"] == "admin" and c["target_type"] == "user" and c["target_id"] == approved
+    assert (
+        c["actor_role"] == "admin"
+        and c["target_type"] == "user"
+        and c["target_id"] == approved
+    )
 
-    r = client.post("%s/admin/alumni/%s/reject" % (URL, rejected), json={"reason": "secret reason text"})
+    r = client.post(
+        "%s/admin/alumni/%s/reject" % (URL, rejected),
+        json={"reason": "secret reason text"},
+    )
     assert r.status_code == 200
     c = one(calls, "admin.alumni_reject")
-    assert c["target_id"] == rejected and c["details"] is None  # the reason text stays out
+    assert (
+        c["target_id"] == rejected and c["details"] is None
+    )  # the reason text stays out
 
-    r = client.patch("%s/admin/users/%s/status" % (URL, applicant_id), json={"status": "suspended"})
+    r = client.patch(
+        "%s/admin/users/%s/status" % (URL, applicant_id), json={"status": "suspended"}
+    )
     assert r.status_code == 200
     c = one(calls, "admin.user_status")
     assert c["target_id"] == applicant_id and c["details"] == {"status": "suspended"}
