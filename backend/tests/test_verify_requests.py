@@ -1,6 +1,7 @@
 """Proof requests and grants: admin asks, alumni grants, admin opens."""
 
 import base64
+import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,15 @@ from sqlalchemy import select, update
 
 from app import config, proof_purge, storage, verify_crypto
 from app.db import SessionLocal
-from app.models import ProofGrant, User, UserPublicKey, VerificationRequest
+from app.models import (
+    AlumniProfile,
+    ProofGrant,
+    User,
+    UserPublicKey,
+    VerificationProof,
+    VerificationProofCopy,
+    VerificationRequest,
+)
 from test_job import login, make_user
 from test_proof_purge import NOW, admin_key, exists, grant, proof, request
 from test_verify_proof import proof_bytes
@@ -543,3 +552,95 @@ def test_package_uses_the_same_access_rules_as_metadata(client, keks):
     assert (
         r.status_code == 410 and r.json()["detail"] == "GRANT_ENDED"
     )  # after a decision
+
+
+# tests/test_verify_requests.py, at the bottom
+
+# ---------- approve and reject (routers/admin.py) ----------
+
+
+def decide(client, alumni_id, action):
+    body = {"reason": "Bukti tidak sesuai"} if action == "reject" else None
+    return client.post(f"/api/v1/admin/alumni/{alumni_id}/{action}", json=body)
+
+
+def reviewed_world(client, open_it=True):
+    """Granted, and (by default) the admin downloaded the package. Logged in as the admin."""
+    req_id, content = granted_world(client)
+    do_grant(client, req_id)
+    login(client, "root")
+    if open_it:
+        assert package(client, req_id).status_code == 200
+    with SessionLocal() as db:
+        alumni_id = db.get(VerificationRequest, uuid.UUID(req_id)).alumni_id
+    return req_id, alumni_id, content
+
+
+def proof_state(alumni_id):
+    """(proof rows, grant rows, stored files) left for this alumni, and the profile's proof_sha256."""
+    with SessionLocal() as db:
+        proofs = db.scalars(
+            select(VerificationProof).where(VerificationProof.alumni_id == alumni_id)
+        ).all()
+        copies = db.scalars(select(VerificationProofCopy)).all()
+        grants = db.scalars(select(ProofGrant)).all()
+        files = [c.storage_key for c in copies] + [g.pkg_storage_key for g in grants]
+        sha = db.get(AlumniProfile, alumni_id).proof_sha256
+        return len(proofs), len(grants), [f for f in files if exists(f)], sha
+
+
+def test_approve_without_opening_the_proof_is_409(client, keks):
+    req_id, alumni_id, _ = reviewed_world(client, open_it=False)
+    assert (
+        meta(client, req_id).status_code == 200
+    )  # looking at the metadata is not opening
+    r = decide(client, alumni_id, "approve")
+    assert r.status_code == 409 and r.json()["detail"] == "PROOF_NOT_REVIEWED"
+    proofs, grants, files, sha = proof_state(alumni_id)
+    assert proofs == 1 and grants == 1 and files and sha is None  # nothing was purged
+
+
+def test_approve_needs_this_admin_to_have_opened_it(client, keks):
+    _, alumni_id, _ = reviewed_world(client)  # root opened it
+    setup_admin(client, "root2")
+    login(client, "root2")
+    r = decide(client, alumni_id, "approve")
+    assert r.status_code == 409 and r.json()["detail"] == "PROOF_NOT_REVIEWED"
+
+
+def test_approve_keeps_only_the_hash_and_removes_everything_else(client, keks):
+    req_id, alumni_id, content = reviewed_world(client)
+    r = decide(client, alumni_id, "approve")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "active"
+    proofs, grants, files, sha = proof_state(alumni_id)
+    assert (proofs, grants, files) == (0, 0, [])
+    assert sha == hashlib.sha256(content).hexdigest()
+    with SessionLocal() as db:
+        req = db.get(VerificationRequest, uuid.UUID(req_id))
+        assert req.status == "closed" and req.close_reason == "approved"
+    r = package(client, req_id)
+    assert (
+        r.status_code == 410 and r.json()["detail"] == "GRANT_ENDED"
+    )  # the old access code is dead
+
+
+def test_reject_needs_no_review_and_removes_everything(client, keks):
+    req_id, alumni_id, _ = reviewed_world(client, open_it=False)
+    r = decide(client, alumni_id, "reject")
+    assert r.status_code == 200, r.text
+    proofs, grants, files, sha = proof_state(alumni_id)
+    assert (proofs, grants, files, sha) == (0, 0, [], None)
+    with SessionLocal() as db:
+        req = db.get(VerificationRequest, uuid.UUID(req_id))
+        assert req.status == "closed" and req.close_reason == "rejected"
+    assert meta(client, req_id).json()["detail"] == "GRANT_ENDED"
+
+
+def test_failed_approve_check_comes_after_the_old_checks(client, keks):
+    _, alumni_id, _ = reviewed_world(client)
+    assert decide(client, alumni_id, "approve").status_code == 200
+    r = decide(
+        client, alumni_id, "approve"
+    )  # the proof is gone now, but this is the real reason
+    assert r.status_code == 409 and r.json()["detail"] == "ALREADY_APPROVED"
