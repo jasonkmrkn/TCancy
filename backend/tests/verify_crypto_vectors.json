@@ -1,0 +1,54 @@
+{
+  "_comment": "TEST ONLY. Fixed vectors for app/verify_crypto.py, for checking the WebCrypto side (frontend). The RSA key below is a throwaway test key; never use it anywhere else.",
+  "rsa": {
+    "bits": 3072,
+    "exponent": 65537,
+    "private_pkcs8_b64": "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",
+    "public_spki_b64": "MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAk95tcur1CL471lgr51ec40IqrCPs1SaEHWwJ2yEOGMbz7+jfec/+8WDfjQzLhLOfI2m5HrNawBJsMaObH+AtBILM6+XTBCenGGfJNvcZEOLaNOrwx97L7MPDmbno23FKBnHC80cKHGjrPnS9b7ii6g3K9YZv28kKz54/66i+60q7JBOUCkTO8Q1bTR2knL6CoPBQ08E6j8LyaxjyN/HoHReAhV9maXthtgUoc3Sg/Egxn+wEWNdypvG4ut4GFw8XLgrbjhLbL6to9pMnDB1m0FDqArZa9gQrs1d96+UmB6Y7yQmfdYaYh1peikVUCZk5Bij7tPtES5hsI3YwEWObST07tDmP/D4jeahsT6bjVx9Nq/9lvX3XbQ2wJJowtDI28HaK2Bg7WHNnqolG84ATX4v6N5lMH9uEO1m78IXF6g234bghdaHWNJCtV3jDIQl2G9AUWr9Ev5cCmHHnob271c4xDVDvMevZ0squDdPrvwVjIpObLskMwTPlZcQ/61f/AgMBAAE=",
+    "fingerprint_sha256_hex": "35f0cd79fb17c3c4a8c8b2718685edfcc5cf85006e7f092c72d56b87dffa09ff",
+    "webcrypto": {
+      "name": "RSA-OAEP",
+      "hash": "SHA-256"
+    }
+  },
+  "access_code": {
+    "code_b64": "aYTZJEAPX4lDvFNAoKZmC1cq4Zu6Xkj5FKw08jZxX1zsQrtlkvkKjfU7jiaD2z+L79C8EdZYOYdWpvWx2600kpt8GBviygfumPrF/am3gDIzJi7HGdY8gVbq6TrIaxBZcqQkks5X1y3gilfDnktgZBDxjjY8juoAlUk/gki0+D38j7ql5vvBAeiRFbF2oHMfzBM7SnYfN+W6f9j3HQXABMT1swfoWN+bn4DBueOFq8ua7axh7/7FzS2bZpatrH2SXkHpaMINjJIzjERqf99gqloIiHq6tKsBlJSYowS1Aly/xKQ31Ml23jd5usNI2T2tFQA7yzzLL1H3e6mB+o19+UutRpZYx2Hn819R+49jkON7NfmyPvRkJXJlFmc6z/zVGanCKoiqn3BM6HGQWyD3wS24rBOOwy3RLD49Fi6WPXPrgIxUsq61pmR3KnnpiWIHkp1AK7dn+dd0xtgjy8UzjIgJqWhdOx6rCl0Live9CcBTI+vXP7F7ydL/Ba3Wzh1e",
+    "expected_k_hex": "4f5ba1382c66e972b3e505d2d552b7bca0f532c8263f5f7a9d6ddd29ab4a3102"
+  },
+  "package": {
+    "webcrypto": {
+      "name": "AES-GCM",
+      "tagLength": 128
+    },
+    "grant_id": "7c1f6a52-3b0e-4d6a-9f21-5e8c0d4b2a19",
+    "grant_id_hex": "7c1f6a523b0e4d6a9f215e8c0d4b2a19",
+    "k_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "pkg_nonce_hex": "a1b2c3d4e5f60718",
+    "chunk_size": 16,
+    "plaintext_utf8": "TCancy proof vector: three chunks.",
+    "plaintext_hex": "5443616e63792070726f6f6620766563746f723a207468726565206368756e6b732e",
+    "chunks": [
+      {
+        "index": 0,
+        "last": false,
+        "iv_hex": "a1b2c3d4e5f6071800000000",
+        "additional_data_hex": "7c1f6a523b0e4d6a9f215e8c0d4b2a190000000000",
+        "ciphertext_and_tag_hex": "681b7d087727a735354aa2ca1574e3177a4da0d3c2cb8d2ecff8bb7be7ca80ab"
+      },
+      {
+        "index": 1,
+        "last": false,
+        "iv_hex": "a1b2c3d4e5f6071800000001",
+        "additional_data_hex": "7c1f6a523b0e4d6a9f215e8c0d4b2a190000000100",
+        "ciphertext_and_tag_hex": "e7711359b8da7263af6144e02e72184889b5057b26892a9752c31f706509000a"
+      },
+      {
+        "index": 2,
+        "last": true,
+        "iv_hex": "a1b2c3d4e5f6071800000002",
+        "additional_data_hex": "7c1f6a523b0e4d6a9f215e8c0d4b2a190000000201",
+        "ciphertext_and_tag_hex": "8ac7eb862dc17a695ea1ba8b20306d804b80"
+      }
+    ]
+  }
+}
