@@ -19,6 +19,7 @@ _ALLOWED = {
     "cv": {"pdf"},
     "ktp": {"jpg", "png", "pdf"},
     "intro_video": {"mp4"},
+    "verification_proof": {"pdf", "jpg", "png"},  #alumni proof
 }
 
 _MP4_BRANDS = frozenset({b"isom", b"iso2", b"mp41", b"mp42", b"avc1"})
