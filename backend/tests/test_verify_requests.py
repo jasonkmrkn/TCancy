@@ -12,7 +12,7 @@ from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
 from sqlalchemy import select, update
 
-from app import config, storage, verify_crypto
+from app import config, proof_purge, storage, verify_crypto
 from app.db import SessionLocal
 from app.models import ProofGrant, User, UserPublicKey, VerificationRequest
 from test_job import login, make_user
@@ -365,3 +365,99 @@ def test_failed_commit_leaves_no_package_file(client, keks, monkeypatch):
     with SessionLocal() as db:
         assert db.scalar(select(ProofGrant)) is None
         assert db.get(VerificationRequest, uuid.UUID(req_id)).status == "pending"
+
+
+# ---------- GET /admin/proof-grants/{request_id} ----------
+
+
+def meta(client, req_id):
+    return client.get(f"/api/v1/admin/proof-grants/{req_id}")
+
+
+def test_admin_sees_package_metadata(client, keks):
+    req_id, content = granted_world(client)
+    grant_id = do_grant(client, req_id).json()["grant_id"]
+    login(client, "root")
+    r = meta(client, req_id)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    with SessionLocal() as db:
+        row = db.get(ProofGrant, uuid.UUID(grant_id))
+        assert body == {
+            "request_id": req_id,
+            "grant_id": grant_id,
+            "ext": "pdf",
+            "size": len(content),
+            "pkg_size": row.pkg_size,
+            "pkg_nonce": row.pkg_nonce.hex(),
+            "chunk_size": config.PROOF_CHUNK_SIZE,
+            "recipient_fingerprint": VECTORS["rsa"]["fingerprint_sha256_hex"],
+            "expires_at": body["expires_at"],
+            "opened_at": None,
+        }
+    assert "k_wrapped" not in r.text and "kek" not in r.text
+
+
+def test_metadata_before_the_alumni_grants_is_404(client, keks):
+    req_id, _ = granted_world(client)
+    login(client, "root")
+    r = meta(client, req_id)
+    assert r.status_code == 404 and r.json()["detail"] == "GRANT_NOT_FOUND"
+
+
+def test_another_admin_cannot_see_the_grant(client, keks):
+    req_id, _ = granted_world(client)
+    do_grant(client, req_id)
+    setup_admin(client, "root2")
+    login(client, "root2")
+    r = meta(client, req_id)
+    assert r.status_code == 404 and r.json()["detail"] == "GRANT_NOT_FOUND"
+
+
+@pytest.mark.parametrize("target", ["not-a-uuid", str(uuid.uuid4())])
+def test_unknown_grant_is_404(client, target):
+    setup_admin(client)
+    login(client, "root")
+    assert meta(client, target).json()["detail"] == "GRANT_NOT_FOUND"
+
+
+def test_purged_grant_is_410(client, keks):
+    req_id, _ = granted_world(client)
+    do_grant(client, req_id)
+    with SessionLocal() as db:
+        req = db.get(VerificationRequest, uuid.UUID(req_id))
+        keys = proof_purge.purge_for_alumni(db, req.alumni_id, "approved")
+        db.commit()
+    proof_purge.delete_files(keys)
+    login(client, "root")
+    r = meta(client, req_id)
+    assert r.status_code == 410 and r.json()["detail"] == "GRANT_ENDED"
+
+
+def test_expired_grant_is_410(client, keks):
+    req_id, _ = granted_world(client)
+    do_grant(client, req_id)
+    with SessionLocal() as db:
+        db.execute(
+            update(VerificationRequest).values(expires_at=NOW - timedelta(seconds=1))
+        )
+        db.commit()
+    login(client, "root")
+    assert meta(client, req_id).json()["detail"] == "GRANT_ENDED"
+
+
+def test_removed_kek_version_is_410(client, keks, monkeypatch):
+    req_id, _ = granted_world(client)
+    do_grant(client, req_id)
+    monkeypatch.setattr(
+        config, "PROOF_KEKS", {2: b"\x22" * 32}
+    )  # v1 was deleted from the env
+    login(client, "root")
+    r = meta(client, req_id)
+    assert r.status_code == 410 and r.json()["detail"] == "GRANT_ENDED"
+
+
+def test_metadata_is_for_admins_only(client, keks):
+    req_id, _ = granted_world(client)
+    do_grant(client, req_id)
+    assert meta(client, req_id).status_code == 403  # still logged in as the alumni
