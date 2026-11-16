@@ -69,6 +69,16 @@ def _redis_url_env(name):
         raise ValueError(f"{name} must start with redis://, rediss:// or unix://")
     return raw
 
+def _kek_env(name):
+    """Optional root key for the proof KEK: 64 hex characters (32 bytes), empty for an unused slot."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    if len(raw) != 64 or not all(c in "0123456789abcdefABCDEF" for c in raw):
+        # The value is a secret, so unlike the other helpers it is not echoed back.
+        raise ValueError(f"{name} must be 64 hex characters (openssl rand -hex 32)")
+    return bytes.fromhex(raw)
+
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql+psycopg://tcancy:tcancy@localhost:5433/tcancy"
 )
@@ -94,6 +104,23 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
 
 ACCESS_TOKEN_MINUTES = 15
 REFRESH_TOKEN_DAYS = 7
+
+# Root keys of the server-side KEK for verification proofs (HKDF-SHA256 input, see
+# app.verify_crypto). Three slots so a key can be rotated; PROOF_KEKS holds only the filled ones.
+_proof_roots = {version: _kek_env(f"PROOF_KEK_V{version}") for version in (1, 2, 3)}
+PROOF_KEKS = {version: key for version, key in _proof_roots.items() if key is not None}
+PROOF_KEK_VERSION = _int_env("PROOF_KEK_VERSION", 1, 1, 3)
+# With no slot filled (old tests, local dev) nothing is checked; PROOF_KEKS is just empty.
+if PROOF_KEKS and PROOF_KEK_VERSION not in PROOF_KEKS:
+    raise ValueError(
+        f"PROOF_KEK_VERSION={PROOF_KEK_VERSION} points to an empty slot; fill PROOF_KEK_V{PROOF_KEK_VERSION} "
+        f"or choose one of: {', '.join(str(v) for v in sorted(PROOF_KEKS))}"
+    )
+
+PROOF_MAX_BYTES = 5 * 1024 * 1024
+PROOF_CHUNK_SIZE = 4 * 1024 * 1024
+PROOF_REQUEST_TTL_DAYS = 14
+ADMIN_KEY_TTL_DAYS = 365
 
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").strip().lower() not in ("0", "false", "no")
 

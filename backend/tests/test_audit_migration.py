@@ -112,5 +112,8 @@ def test_downgrade_removes_everything_and_upgrade_brings_it_back(migrated):
 
 
 def test_the_new_revision_is_a_head_and_the_one_before_it_no_longer_is():
+    # Since A2 V0 the three branches are merged into one head (verify_*); it must still carry
+    # the raynald branch, i.e. descend from REVISION, and PREVIOUS must not be a head.
     heads = alembic("heads").stdout
-    assert REVISION in heads and PREVIOUS not in heads
+    assert len(heads.splitlines()) == 1 and "raynald" in heads and PREVIOUS not in heads
+    assert REVISION in alembic("history", "-r", "%s:heads" % REVISION).stdout

@@ -434,11 +434,16 @@ def test_aborted_upload_leaves_nothing(client, clean_tempdir, monkeypatch):
 
 # --- 9. the whole axel migration branch ------------------------------------------------
 
+# The last axel revision. "axel@head" now resolves to the merged A2 head, which would also
+# pull in the jason and raynald branches, so the branch test pins the revision by name.
+AXEL_HEAD = "axel_04_crypto_benchmarks"
+
 
 def test_whole_axel_branch_and_all_heads_on_an_empty_database():
     heads = subprocess.run([sys.executable, "-m", "alembic", "heads"], cwd=BACKEND,
                            capture_output=True, text=True, check=True).stdout
-    assert len([line for line in heads.splitlines() if "(axel)" in line]) == 1
+    # Since A2 V0 all branches meet in one merged head that still carries the axel label.
+    assert len(heads.splitlines()) == 1 and "axel" in heads
 
     with empty_database() as (alembic, scalar_in):
         def objects():
@@ -464,11 +469,11 @@ def test_whole_axel_branch_and_all_heads_on_an_empty_database():
         }
         at_root = {k: not v for k, v in at_head.items()}
 
-        alembic("upgrade", "axel@head")
+        alembic("upgrade", AXEL_HEAD)
         assert objects() == at_head
         alembic("downgrade", "axel_00_branch_root")
         assert objects() == at_root
-        alembic("upgrade", "axel@head")
+        alembic("upgrade", AXEL_HEAD)
         assert objects() == at_head
 
         alembic("upgrade", "heads")

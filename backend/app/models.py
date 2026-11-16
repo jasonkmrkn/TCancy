@@ -5,6 +5,7 @@ from sqlalchemy import (
     DDL,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -104,6 +105,7 @@ class AlumniProfile(Base):
     )
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rejection_reason: Mapped[str | None] = mapped_column(Text)
+    proof_sha256: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -429,3 +431,129 @@ class IntegrityTag(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+
+class UserPublicKey(Base):
+    __tablename__ = "user_public_keys"
+    __table_args__ = (
+        Index(
+            "uq_user_public_keys_active", "user_id",
+            unique=True, postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    algorithm: Mapped[str] = mapped_column(Text, nullable=False)
+    public_key_spki: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class VerificationProof(Base):
+    __tablename__ = "verification_proofs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    alumni_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    ext: Mapped[str] = mapped_column(Text, nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class VerificationProofCopy(Base):
+    __tablename__ = "verification_proof_copies"
+    __table_args__ = (
+        UniqueConstraint("proof_id", "algorithm", name="uq_verification_proof_copies_proof_algorithm"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    proof_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("verification_proofs.id", ondelete="CASCADE"), nullable=False
+    )
+    algorithm: Mapped[str] = mapped_column(Text, nullable=False)
+    salt: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    storage_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("4194304"))
+    ciphertext_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+VERIFICATION_REQUEST_STATUSES = ("pending", "granted", "closed", "expired")
+
+
+class VerificationRequest(Base):
+    __tablename__ = "verification_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN (%s)" % ", ".join(f"'{s}'" for s in VERIFICATION_REQUEST_STATUSES),
+            name="ck_verification_requests_status",
+        ),
+        Index(
+            "uq_verification_requests_open", "alumni_id", "admin_id",
+            unique=True, postgresql_where=text("status IN ('pending', 'granted')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    alumni_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    close_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class ProofGrant(Base):
+    __tablename__ = "proof_grants"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("verification_requests.id", ondelete="CASCADE"),
+        unique=True, nullable=False,
+    )
+    recipient_key_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_public_keys.id"), nullable=False
+    )
+    k_wrapped: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    kek_salt: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    kek_nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    kek_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    pkg_nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    pkg_storage_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    pkg_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
