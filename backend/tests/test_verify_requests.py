@@ -3,7 +3,7 @@
 import base64
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -54,7 +54,9 @@ def test_admin_can_request_proof(client):
     body = r.json()
     assert body["status"] == "pending" and body["alumni_id"] == str(alumni_id)
     expires = datetime.fromisoformat(body["expires_at"])
-    expected = NOW + timedelta(days=config.PROOF_REQUEST_TTL_DAYS)
+    expected = datetime.now(timezone.utc) + timedelta(
+        days=config.PROOF_REQUEST_TTL_DAYS
+    )
     assert abs((expires - expected).total_seconds()) < 60
 
 
