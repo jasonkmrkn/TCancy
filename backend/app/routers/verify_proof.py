@@ -40,9 +40,9 @@ if config.PROOF_CHUNK_SIZE != CHUNK_SIZE:
 
 
 def _close_grants(db: Session, alumni_id: uuid.UUID, reason: str) -> list[str]:
-    """Close the alumni's grants (Raynald, V6). Does not commit; returns the package storage keys
-    to delete after the commit. ponytail: placeholder name until agreed with Raynald."""
-    return proof_purge.close_grants_for_alumni(db, alumni_id, reason) or []
+    """Close the alumni's granted requests and drop their grants (proof_purge, V6). Does not
+    commit; returns the package storage keys to delete after the commit."""
+    return proof_purge.end_grants_for_alumni(db, alumni_id, reason)
 
 
 def _view(p: VerificationProof) -> dict:
