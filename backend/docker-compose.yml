@@ -43,6 +43,10 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?isi SESSION_SECRET di backend/.env (openssl rand -hex 32)}
       MASTER_KEY: ${MASTER_KEY:?isi MASTER_KEY di backend/.env (openssl rand -base64 32)}
       BLIND_INDEX_KEY: ${BLIND_INDEX_KEY:?isi BLIND_INDEX_KEY di backend/.env (openssl rand -hex 32)}
+      PROOF_KEK_V1: ${PROOF_KEK_V1:-}
+      PROOF_KEK_V2: ${PROOF_KEK_V2:-}
+      PROOF_KEK_V3: ${PROOF_KEK_V3:-}
+      PROOF_KEK_VERSION: ${PROOF_KEK_VERSION:-1}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       ENCRYPTION_POLICY: ${ENCRYPTION_POLICY:-assignment}
       INTEGRITY_MODE: ${INTEGRITY_MODE:-off}

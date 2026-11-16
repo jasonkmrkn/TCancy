@@ -55,6 +55,17 @@ const MESSAGES: Record<string, string> = {
   NO_CHANGE: 'Nothing to change.',
   CONSENT_REQUIRED: 'Please accept all the consent statements to apply.',
   INVALID_CONSENT: 'One of the consent statements is not valid.',
+  NO_PROOF: 'The alumni has not uploaded a proof yet.',
+  NO_PUBLIC_KEY: 'No active public key is registered for this admin.',
+  GRANT_ENDED: 'This access has ended and the proof is no longer available.',
+  PROOF_NOT_REVIEWED: 'Open and review the proof before making a decision.',
+  PROOF_NOT_FOUND: 'Proof not found.',
+  REQUEST_NOT_FOUND: 'Request not found.',
+  REQUEST_EXISTS: 'There is already an open request for this alumni.',
+  REQUEST_ENDED: 'This request has already ended.',
+  GRANT_NOT_FOUND: 'Access grant not found.',
+  KEY_NOT_FOUND: 'Public key not found.',
+  INVALID_PUBLIC_KEY: 'The public key is not valid.',
 };
 
 export function messageFor(code: string, fallback: string): string {

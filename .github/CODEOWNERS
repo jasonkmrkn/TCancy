@@ -1,0 +1,10 @@
+* @rrraynald
+backend/app/verify_crypto.py @axelprb
+backend/app/routers/verify_keys.py @axelprb
+backend/app/routers/verify_proof.py @axelprb
+backend/app/routers/verify_requests.py @jasonkmrkn
+backend/app/routers/admin.py @jasonkmrkn
+frontend/ @febryannnn
+frontend/lib/api.ts @febryannnn @rrraynald
+.github/ @rrraynald
+docker-compose.prod.yml @rrraynald
