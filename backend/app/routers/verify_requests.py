@@ -1,7 +1,9 @@
+import itertools
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -274,3 +276,28 @@ def grant_metadata(
         "expires_at": req.expires_at.isoformat(),
         "opened_at": grant.opened_at.isoformat() if grant.opened_at else None,
     }
+
+
+# app/routers/verify_requests.py, at the bottom
+
+
+@router.get("/admin/proof-grants/{request_id}/package")
+def grant_package(
+    request_id: str, user: User = Depends(ADMIN), db: Session = Depends(get_db)
+):
+    _, grant = _admin_grant(db, user, request_id)
+    size = grant.pkg_size
+    pieces = storage.read(grant.pkg_storage_key)
+    try:
+        # Read the first piece now: a missing file is a 500 before opened_at is set.
+        first = next(pieces, b"")
+    except storage.StorageError:
+        raise HTTPException(status_code=500, detail="STORAGE_ERROR")
+    if grant.opened_at is None:  # the first download counts; later ones keep that time
+        grant.opened_at = _now()
+        db.commit()
+    return StreamingResponse(
+        itertools.chain([first], pieces),
+        media_type="application/octet-stream",
+        headers={"Content-Length": str(size)},
+    )
