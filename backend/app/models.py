@@ -544,7 +544,8 @@ class ProofGrant(Base):
         unique=True, nullable=False,
     )
     recipient_key_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("user_public_keys.id"), nullable=False
+        # CASCADE: deleting an admin account must not trip over the grants wrapped for its key
+        UUID(as_uuid=True), ForeignKey("user_public_keys.id", ondelete="CASCADE"), nullable=False
     )
     k_wrapped: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     kek_salt: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
