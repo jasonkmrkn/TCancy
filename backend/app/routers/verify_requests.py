@@ -73,9 +73,8 @@ def create_proof_request(
     db.add(req)
     try:
         db.commit()
-    except (
-        IntegrityError
-    ):  # uq_verification_requests_open: this admin already has an open request
+    except IntegrityError:
+        # uq_verification_requests_open: this admin already has an open request
         db.rollback()
         raise HTTPException(status_code=409, detail="REQUEST_EXISTS")
     db.refresh(req)
@@ -101,8 +100,8 @@ def my_verification_requests(
         .where(
             VerificationRequest.alumni_id == user.id,
             VerificationRequest.status.in_(OPEN),
-            VerificationRequest.expires_at
-            > _now(),  # past 14 days counts as gone, even before the cron runs
+            # past 14 days counts as gone, even before the cron runs
+            VerificationRequest.expires_at > _now(),
         )
         .order_by(VerificationRequest.created_at.desc())
     ).all()
@@ -217,4 +216,61 @@ def grant_request(
         "grant_id": str(grant_id),
         "access_code": access_code,
         "admin_fingerprint": key.fingerprint,
+    }
+
+
+def _admin_grant(
+    db: Session, user: User, request_id: str
+) -> tuple[VerificationRequest, ProofGrant]:
+    """The admin's own granted request and its grant.
+
+    {id} in /admin/proof-grants/{id} is the request id: the admin already has it from
+    proof-request, and the request row outlives the grant (purge deletes the grant).
+    404 GRANT_NOT_FOUND: unknown, another admin's, or not granted yet.
+    410 GRANT_ENDED: closed, expired, or its KEK version was removed from the environment.
+    """
+    try:
+        ident = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="GRANT_NOT_FOUND")
+    req = db.scalar(
+        select(VerificationRequest).where(
+            VerificationRequest.id == ident,
+            VerificationRequest.admin_id == user.id,
+        )
+    )
+    if req is None or req.status == "pending":
+        raise HTTPException(status_code=404, detail="GRANT_NOT_FOUND")
+    grant = db.scalar(select(ProofGrant).where(ProofGrant.request_id == req.id))
+    if req.status != "granted" or req.expires_at <= _now() or grant is None:
+        raise HTTPException(status_code=410, detail="GRANT_ENDED")
+    if grant.kek_version not in config.PROOF_KEKS:
+        raise HTTPException(status_code=410, detail="GRANT_ENDED")
+    return req, grant
+
+
+@router.get("/admin/proof-grants/{request_id}")
+def grant_metadata(
+    request_id: str, user: User = Depends(ADMIN), db: Session = Depends(get_db)
+):
+    req, grant = _admin_grant(db, user, request_id)
+    proof = db.scalar(
+        select(VerificationProof).where(VerificationProof.alumni_id == req.alumni_id)
+    )
+    if (
+        proof is None
+    ):  # cannot happen while the grant exists (purge removes both), but never 500
+        raise HTTPException(status_code=410, detail="GRANT_ENDED")
+    key = db.get(UserPublicKey, grant.recipient_key_id)
+    return {
+        "request_id": str(req.id),
+        "grant_id": str(grant.id),
+        "ext": proof.ext,
+        "size": proof.size,
+        "pkg_size": grant.pkg_size,
+        "pkg_nonce": grant.pkg_nonce.hex(),
+        "chunk_size": config.PROOF_CHUNK_SIZE,
+        "recipient_fingerprint": key.fingerprint,
+        "expires_at": req.expires_at.isoformat(),
+        "opened_at": grant.opened_at.isoformat() if grant.opened_at else None,
     }
