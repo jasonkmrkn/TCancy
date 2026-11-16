@@ -27,6 +27,9 @@ from app.routers import jobs as jobs_router
 from app.routers import owner as owner_router
 from app.routers import profile as profile_router
 from app.routers import testimonials as testimonials_router
+from app.routers import verify_keys as verify_keys_router
+from app.routers import verify_proof as verify_proof_router
+from app.routers import verify_requests as verify_requests_router
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -47,12 +50,18 @@ app.include_router(dashboard_router.router)
 app.include_router(admin_audit_router.router)
 app.include_router(analysis_router.router)
 app.include_router(admin_benchmarks_router.router)
+app.include_router(verify_keys_router.router)
+app.include_router(verify_proof_router.router)
+app.include_router(verify_requests_router.router)
 
 MiB = 1024 * 1024
 app.add_middleware(
     BodySizeLimitMiddleware,
     default_limit=1 * MiB,
-    limits={("POST", "/api/v1/me/documents"): 51 * MiB},  # 50 MiB video + form overhead
+    limits={
+        ("POST", "/api/v1/me/documents"): 51 * MiB,  # 50 MiB video + form overhead
+        ("POST", "/api/v1/me/verification-proof"): 6 * MiB,  # 5 MiB proof + form overhead
+    },
 )
 app.add_middleware(OriginCheckMiddleware, allowed_origin=config.FRONTEND_ORIGIN)
 app.add_middleware(
