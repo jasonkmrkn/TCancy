@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 permissions:
@@ -73,6 +73,9 @@ jobs:
 
       - name: Ruff
         run: ruff check .
+
+      - name: Alembic has a single head
+        run: test "$(alembic heads | grep -c '(head)')" -eq 1
 
       - name: Pytest
         run: python -m pytest -q
