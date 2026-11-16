@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import config
+from app import config, storage, verify_crypto
 from app.admin import _alumni_or_404
 from app.db import get_db
 from app.deps import require_role
@@ -17,6 +17,7 @@ from app.models import (
     VerificationProof,
     VerificationRequest,
 )
+from app.routers.verify_proof import open_proof
 
 router = APIRouter(prefix="/api/v1", tags=["verify-requests"])
 ADMIN = require_role("admin")
@@ -119,3 +120,101 @@ def my_verification_requests(
             }
         )
     return out
+
+
+def _own_request(db: Session, user: User, request_id: str) -> VerificationRequest:
+    """The alumni's own request, locked for this transaction. Someone else's request is 404 too."""
+    try:
+        ident = uuid.UUID(request_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="REQUEST_NOT_FOUND")
+    req = db.scalar(
+        select(VerificationRequest)
+        .where(
+            VerificationRequest.id == ident,
+            VerificationRequest.alumni_id == user.id,
+        )
+        .with_for_update()
+    )
+    if req is None:
+        raise HTTPException(status_code=404, detail="REQUEST_NOT_FOUND")
+    return req
+
+
+class _Counted:
+    """Passes the package chunks through to storage and adds up their size on the way."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.size = 0
+
+    def __iter__(self):
+        for chunk in self.chunks:
+            self.size += len(chunk)
+            yield chunk
+
+
+@router.post("/me/verification-requests/{request_id}/grant", status_code=201)
+def grant_request(
+    request_id: str, user: User = Depends(ALUMNI), db: Session = Depends(get_db)
+):
+    req = _own_request(db, user, request_id)
+    if req.status != "pending" or req.expires_at <= _now():
+        raise HTTPException(status_code=409, detail="REQUEST_ENDED")
+    key = _active_key(db, req.admin_id)
+    if key is None:
+        raise HTTPException(status_code=409, detail="NO_PUBLIC_KEY")
+    if (
+        db.scalar(
+            select(VerificationProof.id).where(VerificationProof.alumni_id == user.id)
+        )
+        is None
+    ):
+        raise HTTPException(status_code=409, detail="NO_PROOF")
+
+    _, plaintext = open_proof(db, user.id)  # checks the stored sha256 first
+    grant_id = (
+        uuid.uuid4()
+    )  # chosen here: the package AAD and the KEK context both need it
+    k = verify_crypto.new_share_key()
+    pkg_nonce, sealed = verify_crypto.encrypt_package(
+        plaintext,
+        k,
+        grant_id,
+        chunk_size=config.PROOF_CHUNK_SIZE,
+    )
+    package = _Counted(sealed)
+    try:
+        pkg_key = storage.write(package)
+    except storage.StorageError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="STORAGE_ERROR")
+
+    try:
+        access_code = verify_crypto.wrap_for_recipient(key.public_key_spki, k)
+        db.add(
+            ProofGrant(
+                id=grant_id,
+                request_id=req.id,
+                recipient_key_id=key.id,
+                pkg_nonce=pkg_nonce,
+                pkg_storage_key=pkg_key,
+                pkg_size=package.size,
+                **verify_crypto.wrap_kek(k, grant_id=grant_id, recipient_key_id=key.id),
+            )
+        )
+        req.status = "granted"
+        db.commit()
+    except Exception:
+        db.rollback()
+        storage.delete(
+            pkg_key
+        )  # no row points at the package, so it must not stay on disk
+        raise
+
+    return {
+        "request_id": str(req.id),
+        "grant_id": str(grant_id),
+        "access_code": access_code,
+        "admin_fingerprint": key.fingerprint,
+    }
