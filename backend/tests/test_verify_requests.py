@@ -461,3 +461,85 @@ def test_metadata_is_for_admins_only(client, keks):
     req_id, _ = granted_world(client)
     do_grant(client, req_id)
     assert meta(client, req_id).status_code == 403  # still logged in as the alumni
+
+
+# tests/test_verify_requests.py, at the bottom
+
+# ---------- GET /admin/proof-grants/{request_id}/package ----------
+
+
+def package(client, req_id):
+    return client.get(f"/api/v1/admin/proof-grants/{req_id}/package")
+
+
+def opened_at(grant_id):
+    with SessionLocal() as db:
+        return db.get(ProofGrant, uuid.UUID(grant_id)).opened_at
+
+
+def test_admin_downloads_the_package_and_it_opens(client, keks):
+    req_id, content = granted_world(client)
+    body = do_grant(client, req_id).json()
+    login(client, "root")
+    r = package(client, req_id)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/octet-stream"
+    assert r.headers["cache-control"] == "no-store"
+    k = PKCS1_OAEP.new(PRIVATE_KEY, hashAlgo=SHA256).decrypt(
+        base64.b64decode(body["access_code"])
+    )
+    with SessionLocal() as db:
+        row = db.get(ProofGrant, uuid.UUID(body["grant_id"]))
+        assert r.content == b"".join(storage.read(row.pkg_storage_key))
+        assert int(r.headers["content-length"]) == row.pkg_size
+        assert open_package(row, k) == content
+
+
+def test_first_download_sets_opened_at_and_later_ones_keep_it(client, keks):
+    req_id, _ = granted_world(client)
+    grant_id = do_grant(client, req_id).json()["grant_id"]
+    login(client, "root")
+    assert meta(client, req_id).json()["opened_at"] is None
+    assert opened_at(grant_id) is None  # metadata alone does not count as opening
+    package(client, req_id)
+    first = opened_at(grant_id)
+    assert first is not None
+    package(client, req_id)
+    assert opened_at(grant_id) == first
+    assert meta(client, req_id).json()["opened_at"] == first.isoformat()
+
+
+def test_missing_package_file_is_500_and_does_not_count_as_opened(client, keks):
+    req_id, _ = granted_world(client)
+    grant_id = do_grant(client, req_id).json()["grant_id"]
+    with SessionLocal() as db:
+        storage.delete(db.get(ProofGrant, uuid.UUID(grant_id)).pkg_storage_key)
+    login(client, "root")
+    r = package(client, req_id)
+    assert r.status_code == 500 and r.json()["detail"] == "STORAGE_ERROR"
+    assert opened_at(grant_id) is None
+
+
+def test_package_uses_the_same_access_rules_as_metadata(client, keks):
+    req_id, _ = granted_world(client)
+    login(client, "root")
+    assert (
+        package(client, req_id).json()["detail"] == "GRANT_NOT_FOUND"
+    )  # not granted yet
+    login(client, "sari")
+    do_grant(client, req_id)
+    setup_admin(client, "root2")
+    login(client, "root2")
+    assert (
+        package(client, req_id).json()["detail"] == "GRANT_NOT_FOUND"
+    )  # another admin
+    with SessionLocal() as db:
+        req = db.get(VerificationRequest, uuid.UUID(req_id))
+        keys = proof_purge.purge_for_alumni(db, req.alumni_id, "rejected")
+        db.commit()
+    proof_purge.delete_files(keys)
+    login(client, "root")
+    r = package(client, req_id)
+    assert (
+        r.status_code == 410 and r.json()["detail"] == "GRANT_ENDED"
+    )  # after a decision
