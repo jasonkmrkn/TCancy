@@ -4,13 +4,13 @@ import uuid
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app import config
 from app.db import SessionLocal
 from app.models import User, UserPublicKey
 from test_job import login, make_user
-from test_proof_purge import NOW, admin_key, proof
+from test_proof_purge import NOW, admin_key, grant, proof, request
 
 
 def setup_admin(client, username="root", with_key=True):
@@ -119,3 +119,83 @@ def test_non_admin_is_403(client):
     make_user(client, "budi", "alumni")
     login(client, "budi")
     assert ask(client, alumni_id).status_code == 403
+
+
+# ---------- GET /me/verification-requests ----------
+
+INBOX = "/api/v1/me/verification-requests"
+
+
+def test_alumni_sees_open_requests_with_admin_and_fingerprint(client):
+    setup_admin(client)
+    alumni_id = setup_alumni(client)
+    login(client, "root")
+    req_id = ask(client, alumni_id).json()["id"]
+    login(client, "sari")
+    r = client.get(INBOX)
+    assert r.status_code == 200, r.text
+    (item,) = r.json()
+    assert item["id"] == req_id and item["status"] == "pending"
+    assert item["admin_username"] == "root" and item["admin_fingerprint"] == "0" * 64
+    assert set(item) == {
+        "id",
+        "status",
+        "admin_username",
+        "admin_fingerprint",
+        "created_at",
+        "expires_at",
+    }
+
+
+def test_inbox_is_empty_without_requests(client):
+    setup_alumni(client)
+    login(client, "sari")
+    assert client.get(INBOX).json() == []
+
+
+def test_alumni_only_sees_their_own_requests(client):
+    setup_admin(client)
+    sari = setup_alumni(client, "sari")
+    setup_alumni(client, "tono")
+    login(client, "root")
+    ask(client, sari)
+    login(client, "tono")
+    assert client.get(INBOX).json() == []
+
+
+def test_closed_and_expired_requests_are_hidden(client):
+    admin_id = setup_admin(client)
+    alumni_id = setup_alumni(client)
+    with SessionLocal() as db:
+        admin, alumni = db.get(User, admin_id), db.get(User, alumni_id)
+        request(db, alumni, admin, status="closed")
+        request(
+            db, alumni, admin, expires_at=NOW - timedelta(seconds=1)
+        )  # cron has not run yet
+        db.commit()
+    login(client, "sari")
+    assert client.get(INBOX).json() == []
+
+
+def test_granted_request_shows_the_key_it_was_wrapped_for(client):
+    admin_id = setup_admin(client)
+    alumni_id = setup_alumni(client)
+    with SessionLocal() as db:
+        admin, alumni = db.get(User, admin_id), db.get(User, alumni_id)
+        key = db.scalar(select(UserPublicKey).where(UserPublicKey.user_id == admin_id))
+        req = request(db, alumni, admin, status="granted")
+        grant(db, req, key)
+        key.revoked_at = (
+            NOW  # the admin moved on, but this grant still uses the old key
+        )
+        key.fingerprint = "1" * 64
+        db.commit()
+    login(client, "sari")
+    (item,) = client.get(INBOX).json()
+    assert item["status"] == "granted" and item["admin_fingerprint"] == "1" * 64
+
+
+def test_inbox_is_for_alumni_only(client):
+    setup_admin(client)
+    login(client, "root")
+    assert client.get(INBOX).status_code == 403
