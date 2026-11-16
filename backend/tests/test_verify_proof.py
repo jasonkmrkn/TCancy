@@ -36,7 +36,7 @@ def setup(monkeypatch):
         calls.append((alumni_id, reason))
         return []
 
-    monkeypatch.setattr(proof_purge, "close_grants_for_alumni", fake_close, raising=False)
+    monkeypatch.setattr(proof_purge, "end_grants_for_alumni", fake_close)
     return calls
 
 
