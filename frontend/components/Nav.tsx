@@ -19,7 +19,11 @@ export const PUBLIC: Item[] = [
 // Role-specific links, shown in the account dropdown once signed in.
 export function accountMenuFor(user: User | null): Item[] {
   if (!user) return [];
-  if (user.status !== 'active') return [{ href: '/profile', label: 'Profile' }];
+  if (user.status !== 'active') {
+    const pending = [{ href: '/profile', label: 'Profile' }];
+    // A pending alumnus uploads the proof of alumni status and answers the admin's requests here.
+    return user.role === 'alumni' ? [{ href: '/verification', label: 'Verification' }, ...pending] : pending;
+  }
   if (user.role === 'applicant') {
     return [
       { href: '/dashboard', label: 'Dashboard' },
