@@ -55,12 +55,15 @@ jobs:
       - name: Build and push the frontend image
         env:
           TAG: ${{ steps.meta.outputs.tag }}
+          # Repository variable (Settings > Secrets and variables > Actions > Variables), not in the repo.
+          SECRETARIAT_EMAILS: ${{ vars.SECRETARIAT_EMAILS }}
         run: |
           set -euo pipefail
           OWNER=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
           IMAGE="ghcr.io/$OWNER/tcancy-frontend"
           docker build \
             --build-arg API_URL=http://api:8000 \
+            --build-arg NEXT_PUBLIC_SECRETARIAT_EMAILS="$SECRETARIAT_EMAILS" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             -t "$IMAGE:latest" -t "$IMAGE:$TAG" frontend
           docker push --all-tags "$IMAGE"

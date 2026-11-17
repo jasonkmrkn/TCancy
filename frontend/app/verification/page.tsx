@@ -16,6 +16,7 @@ import {
     proof as proofApi,
     PROOF_MAX_BYTES,
     requests as requestsApi,
+    SECRETARIAT_EMAILS,
     type GrantResult,
     type ProofInfo,
     type VerificationRequestItem,
@@ -219,7 +220,9 @@ function CodePanel({ grant, adminUsername }: { grant: GrantResult; adminUsername
             <h4 className="text-sm font-semibold text-zinc-900">Send this access code to the secretariat</h4>
             <p className="mt-2 text-[13px] leading-relaxed text-zinc-600">
                 It is shown only now. The code opens nothing without the admin&apos;s private key, but it has to reach them: send it from
-                your own email app, to the secretariat&apos;s official address.
+                your own email app{SECRETARIAT_EMAILS.length > 0
+                    ? '. The button fills in the secretariat\u2019s addresses for you.'
+                    : ', to the secretariat\u2019s official address.'}
             </p>
             <textarea
                 id={`code-${grant.request_id}`}
