@@ -2,13 +2,13 @@ import itertools
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import config, storage, verify_crypto
+from app import audit, config, storage, verify_crypto
 from app.admin import _alumni_or_404
 from app.db import get_db
 from app.deps import require_role
@@ -54,7 +54,7 @@ def _request_view(req: VerificationRequest) -> dict:
 
 @router.post("/admin/alumni/{alumni_id}/proof-request", status_code=201)
 def create_proof_request(
-    alumni_id: str, user: User = Depends(ADMIN), db: Session = Depends(get_db)
+    http: Request, alumni_id: str, user: User = Depends(ADMIN), db: Session = Depends(get_db)
 ):
     alumni = _alumni_or_404(db, alumni_id)
     if alumni.status != "pending":
@@ -68,11 +68,18 @@ def create_proof_request(
         raise HTTPException(status_code=409, detail="NO_PROOF")
 
     req = VerificationRequest(
+        id=uuid.uuid4(), 
         alumni_id=alumni.id,
         admin_id=user.id,
         expires_at=_now() + timedelta(days=config.PROOF_REQUEST_TTL_DAYS),
     )
     db.add(req)
+    audit.record(
+        db, actor_id=user.id, actor_role=user.role, action="verify.request.create",
+        target_type="verification_request", target_id=req.id,
+        details=audit.details(alumni=alumni.id, valid_days=config.PROOF_REQUEST_TTL_DAYS),
+        **audit.client(http),
+    )
     try:
         db.commit()
     except IntegrityError:
@@ -157,7 +164,7 @@ class _Counted:
 
 @router.post("/me/verification-requests/{request_id}/grant", status_code=201)
 def grant_request(
-    request_id: str, user: User = Depends(ALUMNI), db: Session = Depends(get_db)
+    http: Request, request_id: str, user: User = Depends(ALUMNI), db: Session = Depends(get_db)
 ):
     req = _own_request(db, user, request_id)
     if req.status != "pending" or req.expires_at <= _now():
@@ -193,6 +200,7 @@ def grant_request(
 
     try:
         access_code = verify_crypto.wrap_for_recipient(key.public_key_spki, k)
+        wrapped = verify_crypto.wrap_kek(k, grant_id=grant_id, recipient_key_id=key.id)
         db.add(
             ProofGrant(
                 id=grant_id,
@@ -201,10 +209,19 @@ def grant_request(
                 pkg_nonce=pkg_nonce,
                 pkg_storage_key=pkg_key,
                 pkg_size=package.size,
-                **verify_crypto.wrap_kek(k, grant_id=grant_id, recipient_key_id=key.id),
+                **wrapped,
             )
         )
         req.status = "granted"
+        audit.record(
+            db, actor_id=user.id, actor_role=user.role, action="verify.grant",
+            target_type="verification_request", target_id=req.id,
+            details=audit.details(
+                grant=grant_id, fingerprint=key.fingerprint,
+                kek_version=wrapped["kek_version"], pkg_size=package.size,
+            ),
+            **audit.client(http),
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -283,7 +300,7 @@ def grant_metadata(
 
 @router.get("/admin/proof-grants/{request_id}/package")
 def grant_package(
-    request_id: str, user: User = Depends(ADMIN), db: Session = Depends(get_db)
+    http: Request, request_id: str, user: User = Depends(ADMIN), db: Session = Depends(get_db)
 ):
     _, grant = _admin_grant(db, user, request_id)
     size = grant.pkg_size
@@ -293,9 +310,17 @@ def grant_package(
         first = next(pieces, b"")
     except storage.StorageError:
         raise HTTPException(status_code=500, detail="STORAGE_ERROR")
-    if grant.opened_at is None:  # the first download counts; later ones keep that time
+    first_open = grant.opened_at is None
+    if first_open:
         grant.opened_at = _now()
-        db.commit()
+    # Every download is logged, not only the first: who fetched the package, and how often.
+    audit.record(
+        db, actor_id=user.id, actor_role=user.role, action="verify.package.open",
+        target_type="verification_request", target_id=grant.request_id,
+        details=audit.details(grant=grant.id, first=int(first_open)),
+        **audit.client(http),
+    )
+    db.commit()
     return StreamingResponse(
         itertools.chain([first], pieces),
         media_type="application/octet-stream",
