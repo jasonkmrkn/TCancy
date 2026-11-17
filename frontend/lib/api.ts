@@ -56,6 +56,7 @@ const MESSAGES: Record<string, string> = {
   CONSENT_REQUIRED: 'Please accept all the consent statements to apply.',
   INVALID_CONSENT: 'One of the consent statements is not valid.',
   NO_PROOF: 'The alumni has not uploaded a proof yet.',
+  INTEGRITY_ERROR: 'The stored proof failed its integrity check.',
   NO_PUBLIC_KEY: 'No active public key is registered for this admin.',
   GRANT_ENDED: 'This access has ended and the proof is no longer available.',
   PROOF_NOT_REVIEWED: 'Open and review the proof before making a decision.',

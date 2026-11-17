@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowClockwise, Check, MagnifyingGlass, Quotes, ShieldCheck, X } from '@phosphor-icons/react';
 import BenchmarksTab from '@/components/admin/BenchmarksTab';
 import KeysTab from '@/components/admin/KeysTab';
+import ProofPanel from '@/components/admin/ProofPanel';
 import Chip from '@/components/Chip';
 import FormField, { FormAlert, inputClass, textareaClass } from '@/components/FormField';
 import { SECTION_LABEL } from '@/components/home/Band';
@@ -377,7 +378,8 @@ function AlumniTab() {
                         This profile is incomplete, so it cannot be approved yet. Ask them to add their name, company and class year.
                       </p>
                     )}
-                    <div className="flex flex-wrap gap-3">
+                    <ProofPanel alumniId={a.id} username={a.username} />
+                    <div className="mt-5 flex flex-wrap gap-3">
                       <button
                         type="button"
                         disabled={busy || !a.profile_complete}
