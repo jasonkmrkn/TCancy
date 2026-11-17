@@ -82,7 +82,7 @@ function fieldsFrom(detail: ApiFieldError[]): Record<string, string> {
   return out;
 }
 
-async function toError(res: Response): Promise<ApiError> {
+export async function toError(res: Response): Promise<ApiError> {
   let detail: unknown = null;
   try {
     detail = (await res.json())?.detail;
