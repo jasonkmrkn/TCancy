@@ -9,6 +9,8 @@ import './globals.css';
 const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'TCancy',
   description: 'Jobs and internships for HMTC ITS alumni',

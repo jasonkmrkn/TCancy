@@ -37,8 +37,17 @@ def purge_expired_proofs() -> int:
     """Expire verification requests past their 14 days; returns how many expired."""
     from app import proof_purge
 
+    from app import audit
+
     with SessionLocal() as db:
-        return proof_purge.purge_expired(db)
+        count = proof_purge.purge_expired(db)
+        with audit.quietly(db, "verify.purge_expired"):  # no actor: the cron job did it
+            audit.record(
+                db, actor_id=None, actor_role=None, action="verify.purge_expired",
+                details=audit.details(requests=count),
+            )
+            db.commit()
+        return count
 
 
 def main(argv: list[str] | None = None) -> int:

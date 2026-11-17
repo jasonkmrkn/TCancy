@@ -20,7 +20,12 @@ EXTRA_FIELDS = frozenset({
 _ACTION = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")  # auth.login, account.delete
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")  # keys, roles, target types, field names
 _WORD = re.compile(r"^[a-z][a-z0-9_.]{0,63}$")  # a text value inside details
-_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")  
+_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")  # a SHA-256 fingerprint of a public key
+_UUID_TEXT = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# The only details() keys that take text, and the shape the text must have. Never free text:
+# a username, a file name or an error message cannot pass any of these.
+_TEXT_KEYS = {"fingerprint": _HEX64, "reason": _WORD, "ext": _WORD}
 _CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 _MAX_ACTION = 64
 _MAX_IP = 64
@@ -35,12 +40,15 @@ def _known_fields() -> frozenset[str]:
     return frozenset(columns) | EXTRA_FIELDS
 
 
-def details(fields=(), /, **numbers: int) -> dict:
+def details(fields=(), /, **numbers) -> dict:
     """The only sanctioned way to build the `details` of an audit entry.
 
-    `fields` are names of fields (columns, or EXTRA_FIELDS) that something concerned;
-    keyword arguments are counts, as plain integers. Anything else raises ValueError, and the
-    message never repeats the rejected value.
+    `fields` are names of fields (columns, or EXTRA_FIELDS) that something concerned.
+    Keyword arguments are counts, as plain integers, with three exceptions: a uuid.UUID
+    (stored as its text, for ids such as a grant), and text under the keys in _TEXT_KEYS only
+    (fingerprint: 64 lower-case hex; reason and ext: a short lower-case word). Anything else
+    raises ValueError, and the message never repeats the rejected value. Secrets (keys, the
+    access code, file contents) have no shape that passes.
     """
     if isinstance(fields, (str, bytes)):
         raise ValueError("fields must be a list of field names, not a string")
@@ -55,6 +63,15 @@ def details(fields=(), /, **numbers: int) -> dict:
     for key, number in numbers.items():
         if not _NAME.match(key) or key == "fields":
             raise ValueError("a count needs a plain lower-case name other than 'fields'")
+        if isinstance(number, uuid.UUID):
+            out[key] = str(number)
+            continue
+        if isinstance(number, str):
+            pattern = _TEXT_KEYS.get(key)
+            if pattern is None or not pattern.match(number):
+                raise ValueError("details[%r] takes no text of that shape" % key)
+            out[key] = number
+            continue
         if isinstance(number, bool) or not isinstance(number, int) or abs(number) > _MAX_INT:
             raise ValueError("count %r must be a plain integer" % key)
         out[key] = number
@@ -112,7 +129,7 @@ def _check_value(key: str, value):
         if abs(value) > _MAX_INT:
             raise ValueError("details[%r] is out of range" % key)
     elif isinstance(value, str):
-        if not (_WORD.match(value) or _CODE.match(value)):
+        if not (_WORD.match(value) or _CODE.match(value) or _HEX64.match(value) or _UUID_TEXT.match(value)):
             raise ValueError("details[%r] must be a number or a field name" % key)
     elif isinstance(value, (list, tuple)):
         if len(value) > _MAX_LIST or not all(isinstance(v, str) and (_WORD.match(v) or _CODE.match(v)) for v in value):
