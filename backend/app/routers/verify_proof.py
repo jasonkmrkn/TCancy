@@ -14,7 +14,6 @@ File type checks and upload parsing come from app.upload, storage from app.stora
 The body limit for the upload is set in app.main. Approve and reject stay in routers/admin.py.
 """
 import hashlib
-import itertools
 import uuid
 from collections.abc import Iterator
 
@@ -23,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config, crypto, documents, proof_purge, storage
+from app import audit, config, crypto, documents, proof_purge, storage
 from app.db import get_db
 from app.deps import require_role
 from app.models import User, VerificationProof, VerificationProofCopy
@@ -152,22 +151,37 @@ def open_proof(db: Session, alumni_id: uuid.UUID) -> tuple[VerificationProof, It
     item = _item(proof.id)
     digest = hashlib.sha256()
     try:
-        for chunk in _aes_plain(copy, item):
-            digest.update(chunk)
-        pieces = _aes_plain(copy, item)
-        first = next(pieces, b"")
+        plain = b"".join(_aes_plain(copy, item))
     except storage.StorageError:
         raise HTTPException(status_code=500, detail="STORAGE_ERROR")
-    if digest.hexdigest() != proof.sha256:
+    digest.update(plain)
+    if len(plain) != proof.size or digest.hexdigest() != proof.sha256:
         raise HTTPException(status_code=500, detail="INTEGRITY_ERROR")
-    return proof, itertools.chain([first], pieces)
+    return proof, (plain[i:i + CHUNK_SIZE] for i in range(0, len(plain), CHUNK_SIZE))
+
+
+def _audit(db: Session, request: Request, user: User, action: str, size: int | None = None,
+           ext: str | None = None) -> None:
+    """One entry per proof change, committed on its own like the documents router does."""
+    with audit.quietly(db, action):
+        audit.record(
+            db, actor_id=user.id, actor_role=user.role, action=action,
+            target_type="user", target_id=user.id,
+            details=audit.details(**({"size": size, "ext": ext} if ext else {})),
+            **audit.client(request),
+        )
+        db.commit()
 
 
 @router.post("/me/verification-proof", status_code=201)
 async def upload_proof(request: Request, user: User = Depends(ALUMNI), db: Session = Depends(get_db)):
     upload = MultipartUpload(request)
     await upload.start()
-    return await anyio.to_thread.run_sync(_store, db, user, upload)
+    meta = await anyio.to_thread.run_sync(_store, db, user, upload)
+    await anyio.to_thread.run_sync(
+        lambda: _audit(db, request, user, "verify.proof.upload", meta["size"], meta["ext"])
+    )
+    return meta
 
 
 @router.get("/me/verification-proof")
@@ -176,6 +190,7 @@ def get_proof(user: User = Depends(ALUMNI), db: Session = Depends(get_db)):
 
 
 @router.delete("/me/verification-proof", status_code=204)
-def delete_proof(user: User = Depends(ALUMNI), db: Session = Depends(get_db)):
+def delete_proof(request: Request, user: User = Depends(ALUMNI), db: Session = Depends(get_db)):
     _delete(db, user)
+    _audit(db, request, user, "verify.proof.delete")
     return Response(status_code=204)
