@@ -118,9 +118,16 @@ export function saveRequest(adminId: string, alumniId: string, requestId: string
 /* Sending the code by email (no server involved)                      */
 /* ------------------------------------------------------------------ */
 
+/** Where the access code is sent by default. The alumnus can still change the recipients in the email app. */
+export const SECRETARIAT_EMAILS = [
+    'raynaldfachriansyah@gmail.com',
+    'christianaxel0512@gmail.com',
+    'farelfebryan06@gmail.com',
+] as const;
+
 /**
- * A mailto: link with the subject and body filled in. No address on purpose: the alumnus types
- * the secretariat's address, so the page never sends anything itself and nobody else sees it.
+ * A mailto: link with the recipients, subject and body filled in. The page never sends anything
+ * itself: it opens the alumnus's own email app, and they press send.
  */
 export function buildMailto(opts: { accessCode: string; adminUsername: string; fingerprint: string }): string {
     const subject = 'TCancy alumni verification: access code';
@@ -128,7 +135,7 @@ export function buildMailto(opts: { accessCode: string; adminUsername: string; f
         'Access code: ' + opts.accessCode + '\r\n' +
         'Admin: ' + opts.adminUsername + '\r\n' +
         'Fingerprint: ' + formatFingerprint(opts.fingerprint);
-    return 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+    return 'mailto:' + SECRETARIAT_EMAILS.join(',') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
 }
 
 export function formatBytes(n: number): string {
