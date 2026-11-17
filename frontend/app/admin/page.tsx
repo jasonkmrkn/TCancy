@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowClockwise, Check, MagnifyingGlass, Quotes, ShieldCheck, X } from '@phosphor-icons/react';
 import BenchmarksTab from '@/components/admin/BenchmarksTab';
+import KeysTab from '@/components/admin/KeysTab';
 import Chip from '@/components/Chip';
 import FormField, { FormAlert, inputClass, textareaClass } from '@/components/FormField';
 import { SECTION_LABEL } from '@/components/home/Band';
@@ -27,13 +28,14 @@ import { initials } from '@/lib/labels';
 /* Shared bits                                                         */
 /* ------------------------------------------------------------------ */
 
-type Tab = 'overview' | 'alumni' | 'testimonials' | 'users' | 'benchmarks';
+type Tab = 'overview' | 'alumni' | 'testimonials' | 'users' | 'keys' | 'benchmarks';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'alumni', label: 'Alumni verification' },
   { key: 'testimonials', label: 'Testimonials' },
   { key: 'users', label: 'Users' },
+  { key: 'keys', label: 'Proof key' },
   { key: 'benchmarks', label: 'Benchmarks' },
 ];
 
@@ -754,6 +756,7 @@ export default function AdminPage() {
         {tab === 'alumni' && <AlumniTab />}
         {tab === 'testimonials' && <TestimonialsTab />}
         {tab === 'users' && <UsersTab />}
+        {tab === 'keys' && <KeysTab />}
         {tab === 'benchmarks' && <BenchmarksTab />}
       </div>
     </div>
